@@ -24,7 +24,8 @@ POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/
 # TODO - remove constants if not necessary
 BUFFER_WIDTH_FEET = 1
 # APPROX_FEET_IN_DEGREE used only for logging - original value: 306604.32
-APPROX_FEET_IN_DEGREE = 302114.8036
+#APPROX_FEET_IN_DEGREE = 302114.8036
+APPROX_FEET_IN_DEGREE = 306604.32
 SR_WGS84 = SpatialReference(4326)
 SR_PROJECTED = SpatialReference(2276)
 
@@ -126,7 +127,7 @@ def is_snapped(endpoint: Point, target_point: Point, tolerance: float = 0.000001
     distance = get_point_distance(endpoint, target_point)
     snapped = distance <= tolerance
     #logger.info(f"Endpoint {endpoint} is {'snapped' if snapped else 'not snapped'} to target point {target_point} with gap distance {distance} feet.")
-    logger.info(f"Endpoint is {'snapped' if snapped else 'not snapped'} to target point with gap distance of {distance} degrees, or approximately {distance * APPROX_FEET_IN_DEGREE} feet.")
+    logger.info(f"Endpoint is {'snapped' if snapped else 'not snapped'} to target point with gap distance of {distance} degrees, or approximately {round(distance * APPROX_FEET_IN_DEGREE, 3)} feet.")
     return snapped
 
 
@@ -255,7 +256,7 @@ def process_line(line_feature, buffer_layer, point_layer, snap_tolerance_feet: f
         return False, line_feature
 
 
-def main():
+def main(snap_tolerance_feet=0.01):
     updated = []
     gis = GIS(GIS_LOGIN)
     line_layer = FeatureLayer(LINE_URL)
@@ -273,7 +274,7 @@ def main():
         #if line_fid == 'SS.SL.00038028':
         logger.info(f"\nProcessing line feature: {line_fid}")
         line_updated = False
-        line_updated, processed_line = process_line(line_feature, buffer_feature_layer, point_layer, snap_tolerance_feet=0.3)
+        line_updated, processed_line = process_line(line_feature, buffer_feature_layer, point_layer, snap_tolerance_feet)
         if line_updated:
             updated_count += 1
             result_lines.append(processed_line)
