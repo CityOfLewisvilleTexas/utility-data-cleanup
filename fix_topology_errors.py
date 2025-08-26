@@ -14,8 +14,11 @@ for now:
 
 # --- CONFIG ---
 GIS_LOGIN = "home"
-LINE_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D/FeatureServer/1"
-POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D/FeatureServer/0"
+LINE_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D1/FeatureServer/1"
+POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D1/FeatureServer/0"
+# lines in Sanitary_Sewer_Subset_D have been modified by this script
+#LINE_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D/FeatureServer/1"
+#POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D/FeatureServer/0"
 
 SR_WGS84 = SpatialReference(4326)
 SR_PROJECTED = SpatialReference(2276)
@@ -115,7 +118,7 @@ def is_snapped(endpoint: Point, target_point: Point, tolerance: float = 0.000001
     distance = get_point_distance(endpoint, target_point)
     snapped = distance <= tolerance
     #logger.info(f"Endpoint {endpoint} is {'snapped' if snapped else 'not snapped'} to target point {target_point} with gap distance {distance} feet.")
-    logger.info(f"Endpoint is {'snapped' if snapped else 'not snapped'} to target point with gap distance of {distance} feet.")
+    logger.info(f"Endpoint is {'snapped' if snapped else 'not snapped'} to target point with gap distance of {distance} degrees, or approximately {distance * 306604.32} feet IF east/west difference.")
     return snapped
 
 
@@ -340,9 +343,9 @@ def main():
             logger.warning(f"Skipping invalid geometry in feature {f.attributes.get('FACILITYID')}")
 
     # TODO - Uncomment to apply updates to the line layer
-    if result_lines:
-        line_layer.edit_features(updates=result_lines)
-        logger.info("Line features updated successfully.")
+    #if result_lines:
+    #    line_layer.edit_features(updates=result_lines)
+    #    logger.info("Line features updated successfully.")
 
     
 if __name__ == "__main__":
