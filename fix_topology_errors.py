@@ -21,20 +21,21 @@ POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/
 #POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D/FeatureServer/0"
 
 
-# TODO - remove constants if not necessary
+# TODO - remove constants if not necessary or get_snap_tolerance_degrees()
 BUFFER_WIDTH_FEET = 1
 # APPROX_FEET_IN_DEGREE used only for logging - original value: 306604.32
 #APPROX_FEET_IN_DEGREE = 302114.8036
 APPROX_FEET_IN_DEGREE = 306604.32
 SR_WGS84 = SpatialReference(4326)
 SR_PROJECTED = SpatialReference(2276)
+CONVERSION_FACTOR_FEET_TO_DEGREES = 3.31e-6
 
 def get_snap_tolerance_degrees(snap_tolerance_feet: float) -> float:
     """
     Convert snap tolerance from feet to degrees for City of Lewisville.
     """
-    conversion_factor = 3.31e-6
-    return snap_tolerance_feet * conversion_factor
+    return snap_tolerance_feet * CONVERSION_FACTOR_FEET_TO_DEGREES
+
 
 
 def get_buffer_feature_layer(gis, item_title=None, point_layer=None, buffer_distance=None):
@@ -97,7 +98,7 @@ def get_point_distance(p1: Point, p2: Point) -> float:
 
 def get_nearest_point(point: Point, point_list: list) -> Point:
     """
-    Find the nearest point in the point layer to the given point.
+    Find the nearest point in the point layer to the given point that is also within BUFFER_WIDTH_FEET.
     :param point: Point - the point to find the nearest neighbor for
     :param point_list: list of Point objects - the list containing candidate points
     :return: Point - the nearest point found, or None if no points are in the layer
@@ -110,9 +111,13 @@ def get_nearest_point(point: Point, point_list: list) -> Point:
         #distance = get_point_distance(point, candidate.geometry)
         distance = get_point_distance(point, candidate)
         if distance < min_distance:
+        #if distance < min_distance and distance <= (BUFFER_WIDTH_FEET * 3.31e-6):
             min_distance = distance
             #nearest_point = candidate.geometry
             nearest_point = candidate
+    if min_distance > BUFFER_WIDTH_FEET * CONVERSION_FACTOR_FEET_TO_DEGREES:
+        nearest_point = None
+    logger.debug(f'returning nearest_point: {nearest_point} with distance {min_distance * APPROX_FEET_IN_DEGREE} feet')
     return nearest_point
 
 
@@ -205,10 +210,13 @@ def process_endpoint(line_feature: Feature, endpoint: Point, endpoint_index: int
     updated = False
     ep_in_question = None
     target_points = []
+    #endpoint_buffer_list = []
     for buffer_feature in buffer_features:
         if within(endpoint, buffer_feature.geometry):
             ep_in_question = endpoint
+            # adding one or two utility point features here...but if endpoint is not inside buffer, it should not be snapped to a utility point
             target_points = target_points + get_points_in_buffer(point_layer, buffer_feature)
+            #endpoint_buffer_list.append(buffer_feature)
     if ep_in_question and target_points:
         # Snap the endpoint to the nearest target point
         nearest_point = get_nearest_point(ep_in_question, target_points)
