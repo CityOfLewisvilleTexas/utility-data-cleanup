@@ -20,13 +20,13 @@ POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/
 #LINE_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D/FeatureServer/1"
 #POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D/FeatureServer/0"
 
-SR_WGS84 = SpatialReference(4326)
-SR_PROJECTED = SpatialReference(2276)
 
 # TODO - remove constants if not necessary
 BUFFER_WIDTH_FEET = 1
 # APPROX_FEET_IN_DEGREE used only for logging - original value: 306604.32
 APPROX_FEET_IN_DEGREE = 302114.8036
+SR_WGS84 = SpatialReference(4326)
+SR_PROJECTED = SpatialReference(2276)
 
 def get_snap_tolerance_degrees(snap_tolerance_feet: float) -> float:
     """
@@ -233,18 +233,11 @@ def process_line(line_feature, buffer_layer, point_layer, snap_tolerance_feet: f
     :param point_layer: FeatureLayer object - the layer containing point features
     :return: tuple (bool, Feature object (line)) - boolean indicating if line was updated, and the line feature which may or may not be updated
     """
-    # TODO - add function for substituting geometry of features?
-    projected_line_geom = project(line_feature.geometry, SR_WGS84, SR_PROJECTED)
-    line_feature.geometry = projected_line_geom
-    endpoints = get_endpoints(projected_line_geom)
+    endpoints = get_endpoints(line_feature.geometry)
     if not endpoints:
         logger.warning("**********Line geometry has no endpoints.**********")
         return (False, line_feature)
     buffer_features = get_intersecting_buffer_features(line_feature, buffer_layer)
-    # project buffer features
-    for bf in buffer_features:
-        projected_buffer_geom = project(bf.geometry, SR_WGS84, SR_PROJECTED)
-        bf.geometry = projected_buffer_geom
     # TODO - build function from logic for a single endpoint if it works - then feed updated line feature to function to check (and possibly modify) second endpoint
     ep1, ep2 = endpoints[0], endpoints[1]
     snap_tolerance_degrees = get_snap_tolerance_degrees(snap_tolerance_feet)
