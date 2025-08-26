@@ -1,6 +1,6 @@
 from arcgis.gis import GIS
 from arcgis.features import FeatureLayer, Feature, use_proximity
-from arcgis.geometry import Point, SpatialReference
+from arcgis.geometry import Point, SpatialReference, project
 from arcgis.geometry.filters import intersects, within
 import math
 from base_logger import logger
@@ -23,9 +23,17 @@ POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/
 SR_WGS84 = SpatialReference(4326)
 SR_PROJECTED = SpatialReference(2276)
 
-# TODO - remove these constants if not necessary
-BUFFER_WIDTH_FEET = 0.3
-SNAP_TOLERANCE_FEET = 0.00000001
+# TODO - remove constants if not necessary
+BUFFER_WIDTH_FEET = 1
+# APPROX_FEET_IN_DEGREE used only for logging - original value: 306604.32
+APPROX_FEET_IN_DEGREE = 302114.8036
+
+def get_snap_tolerance_degrees(snap_tolerance_feet: float) -> float:
+    """
+    Convert snap tolerance from feet to degrees for City of Lewisville.
+    """
+    conversion_factor = 3.31e-6
+    return snap_tolerance_feet * conversion_factor
 
 
 def get_buffer_feature_layer(gis, item_title=None, point_layer=None, buffer_distance=None):
@@ -118,7 +126,7 @@ def is_snapped(endpoint: Point, target_point: Point, tolerance: float = 0.000001
     distance = get_point_distance(endpoint, target_point)
     snapped = distance <= tolerance
     #logger.info(f"Endpoint {endpoint} is {'snapped' if snapped else 'not snapped'} to target point {target_point} with gap distance {distance} feet.")
-    logger.info(f"Endpoint is {'snapped' if snapped else 'not snapped'} to target point with gap distance of {distance} degrees, or approximately {distance * 306604.32} feet IF east/west difference.")
+    logger.info(f"Endpoint is {'snapped' if snapped else 'not snapped'} to target point with gap distance of {distance} degrees, or approximately {distance * APPROX_FEET_IN_DEGREE} feet.")
     return snapped
 
 
@@ -179,7 +187,8 @@ def get_points_in_buffer(point_layer, buffer_feature):
     return points
 
 
-def process_endpoint(line_feature: Feature, endpoint: Point, endpoint_index: int, buffer_features, point_layer):
+def process_endpoint(line_feature: Feature, endpoint: Point, endpoint_index: int, 
+                     buffer_features: list, point_layer: FeatureLayer, snap_tolerance_degrees: float):
     """
     For a single endpoint:
     - Check if endpoint is within any of the given buffer features
@@ -189,6 +198,7 @@ def process_endpoint(line_feature: Feature, endpoint: Point, endpoint_index: int
     :param endpoint_index: int - 0 for start, 1 for end
     :param buffer_features: list of Feature objects - the buffer features to check against
     :param point_layer: FeatureLayer object - the layer containing point features
+    :param snap_tolerance_degrees: float - the snapping tolerance in degrees
     :return: tuple (bool, Feature object (line)) - boolean indicating if endpoint of line was updated, and the line feature which may or may not be updated
     """
     updated = False
@@ -201,7 +211,7 @@ def process_endpoint(line_feature: Feature, endpoint: Point, endpoint_index: int
     if ep_in_question and target_points:
         # Snap the endpoint to the nearest target point
         nearest_point = get_nearest_point(ep_in_question, target_points)
-        if nearest_point and not is_snapped(ep_in_question, nearest_point, SNAP_TOLERANCE_FEET):
+        if nearest_point and not is_snapped(ep_in_question, nearest_point, snap_tolerance_degrees):
             logger.info(f"Endpoint {ep_in_question} will be snapped to nearest point {nearest_point}.")
             updated_line_feature = snap_endpoint_to_point(line_feature, endpoint_index, nearest_point)
             logger.info(f"Snapped endpoint {endpoint_index} of line {line_feature.attributes.get('FACILITYID')} to point {nearest_point}.")
@@ -213,7 +223,7 @@ def process_endpoint(line_feature: Feature, endpoint: Point, endpoint_index: int
     return (updated, line_feature)
 
 
-def process_line(line_feature, buffer_layer, point_layer):
+def process_line(line_feature, buffer_layer, point_layer, snap_tolerance_feet: float):
     """
     For a single line:
     - Get endpoints
@@ -223,19 +233,26 @@ def process_line(line_feature, buffer_layer, point_layer):
     :param point_layer: FeatureLayer object - the layer containing point features
     :return: tuple (bool, Feature object (line)) - boolean indicating if line was updated, and the line feature which may or may not be updated
     """
-    endpoints = get_endpoints(line_feature.geometry)
+    # TODO - add function for substituting geometry of features?
+    projected_line_geom = project(line_feature.geometry, SR_WGS84, SR_PROJECTED)
+    line_feature.geometry = projected_line_geom
+    endpoints = get_endpoints(projected_line_geom)
     if not endpoints:
         logger.warning("**********Line geometry has no endpoints.**********")
         return (False, line_feature)
     buffer_features = get_intersecting_buffer_features(line_feature, buffer_layer)
-
+    # project buffer features
+    for bf in buffer_features:
+        projected_buffer_geom = project(bf.geometry, SR_WGS84, SR_PROJECTED)
+        bf.geometry = projected_buffer_geom
     # TODO - build function from logic for a single endpoint if it works - then feed updated line feature to function to check (and possibly modify) second endpoint
     ep1, ep2 = endpoints[0], endpoints[1]
-    ep1_updated, processed_line_feature = process_endpoint(line_feature, ep1, 0, buffer_features, point_layer)
+    snap_tolerance_degrees = get_snap_tolerance_degrees(snap_tolerance_feet)
+    ep1_updated, processed_line_feature = process_endpoint(line_feature, ep1, 0, buffer_features, point_layer, snap_tolerance_degrees)
     if ep1_updated:
-        ep2_updated, final_line_feature = process_endpoint(processed_line_feature, ep2, 1, buffer_features, point_layer)
+        ep2_updated, final_line_feature = process_endpoint(processed_line_feature, ep2, 1, buffer_features, point_layer, snap_tolerance_degrees)
     else:
-        ep2_updated, final_line_feature = process_endpoint(line_feature, ep2, 1, buffer_features, point_layer)
+        ep2_updated, final_line_feature = process_endpoint(line_feature, ep2, 1, buffer_features, point_layer, snap_tolerance_degrees)
 
     if ep1_updated or ep2_updated:
         logger.info(f"Updated at least one endpoint of line {final_line_feature.attributes.get('FACILITYID')} with new geometry.")
@@ -263,7 +280,7 @@ def main():
         #if line_fid == 'SS.SL.00038028':
         logger.info(f"\nProcessing line feature: {line_fid}")
         line_updated = False
-        line_updated, processed_line = process_line(line_feature, buffer_feature_layer, point_layer)
+        line_updated, processed_line = process_line(line_feature, buffer_feature_layer, point_layer, snap_tolerance_feet=0.3)
         if line_updated:
             updated_count += 1
             result_lines.append(processed_line)
