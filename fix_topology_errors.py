@@ -245,65 +245,6 @@ def process_line(line_feature, buffer_layer, point_layer):
         return False, line_feature
 
 
-# TODO - remove this function if not used
-def process_buffer(buffer_feature, point_feature, line_layer):
-    """
-    For a single buffer:
-    - Get intersecting lines
-    - For each line, get endpoints
-    - If endpoint is inside the buffer and not snapped, add the updated line feature to the list of updated lines.
-    :param buffer_feature: Feature object - the buffer feature to process
-    :param point_feature: Feature object - the point feature to snap to
-    :param line_layer: FeatureLayer - the layer containing utility lines
-    :return: list of updated line features
-    """
-    buffer_geom = buffer_feature.geometry
-    point_geom = point_feature.geometry
-    target_point = Point({"x": point_geom['x'], "y": point_geom['y'], "spatialReference": point_geom['spatialReference']})
-    updated_lines = []
-
-    logger.info(f"Processing buffer around point {point_feature.attributes.get('FACILITYID')} with buffer geometry: {buffer_geom}")
-
-    query_filter = intersects(buffer_geom)
-    # Spatial filter to get only intersecting lines
-    intersecting_lines = line_layer.query(geometry_filter=query_filter,
-                                          #spatial_relationship='intersects',
-                                          return_geometry=True,
-                                          out_fields="*").features
-
-    for line in intersecting_lines:
-        endpoints = get_endpoints(line.geometry)
-        logger.info(f"\nProcessing line {line.attributes.get('FACILITYID')} with endpoints: {endpoints}")
-
-        #ep1 = endpoints[0]
-        #ep2 = endpoints[1]
-        ## TODO - modify snap_endpoint_to_point to return just the corrected point? then construct the line feature from one or both of the edited endpoints?
-        #if within(ep1, buffer_geom) and not is_snapped(ep1, target_point, 0.0001):
-        #    line = snap_endpoint_to_point(line, 0, target_point)
-
-        for i, ep in enumerate(endpoints):
-
-            #logger.info(f'sample endpoint {i}: {ep}')
-            #logger.info(f'buffer_geom: {buffer_geom}')
-            #if within(ep, buffer_geom):
-            #    logger.info(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is within buffer.")
-            #else:
-            #    logger.info(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is NOT within buffer.")
-            #    continue
-
-            # first make a feature from the Point object? or return Feature object from get_endpoints()?
-
-            #logger.info(f'intersection test: {ep.geometry.intersection(buffer_geom)}')
-            if within(ep, buffer_geom) and not is_snapped(ep, target_point, SNAP_TOLERANCE_FEET):
-                snap_endpoint_to_point(line, i, target_point)
-                # TODO - before appending, second endpoint should be checked if it hasn't already
-                #if i == 0:
-                updated_lines.append(line)
-                logger.info(f"Updated endpoint {i} of line {line.attributes.get('OBJECTID')} (snap not yet applied).")
-
-    return updated_lines
-
-
 def main():
     updated = []
     gis = GIS(GIS_LOGIN)
