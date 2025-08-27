@@ -1,6 +1,6 @@
 from arcgis.gis import GIS
 from arcgis.features import FeatureLayer, Feature, use_proximity
-from arcgis.geometry import Point, SpatialReference, project
+from arcgis.geometry import Point, SpatialReference
 from arcgis.geometry.filters import intersects, within
 import math
 from base_logger import logger
@@ -98,7 +98,7 @@ def get_point_distance(p1: Point, p2: Point) -> float:
 
 def get_nearest_point(point: Point, point_list: list) -> Point:
     """
-    Find the nearest point in the point layer to the given point that is also within BUFFER_WIDTH_FEET.
+    Find the nearest point in the point layer to the given point that is also within the specified width of the buffer.
     :param point: Point - the point to find the nearest neighbor for
     :param point_list: list of Point objects - the list containing candidate points
     :return: Point - the nearest point found, or None if no points are in the layer
@@ -265,7 +265,6 @@ def process_line(line_feature, buffer_layer, point_layer, snap_tolerance_feet: f
 
 
 def main(snap_tolerance_feet=0.01):
-    updated = []
     gis = GIS(GIS_LOGIN)
     line_layer = FeatureLayer(LINE_URL)
     point_layer = FeatureLayer(POINT_URL)
@@ -303,9 +302,9 @@ def main(snap_tolerance_feet=0.01):
             logger.warning(f"Skipping invalid geometry in feature {f.attributes.get('FACILITYID')}")
 
     # TODO - Uncomment to apply updates to the line layer
-    #if result_lines:
-    #    line_layer.edit_features(updates=result_lines)
-    #    logger.info("Line features updated successfully.")
+    if result_lines:
+        line_layer.edit_features(updates=result_lines)
+        logger.info("Line features updated successfully.")
 
     
 if __name__ == "__main__":
