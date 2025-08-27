@@ -37,7 +37,6 @@ def get_snap_tolerance_degrees(snap_tolerance_feet: float) -> float:
     return snap_tolerance_feet * CONVERSION_FACTOR_FEET_TO_DEGREES
 
 
-
 def get_buffer_feature_layer(gis, item_title=None, point_layer=None, buffer_distance=None):
     """
     Return a FeatureLayer of buffered features from the specified item in ArcGIS Online or a new buffer created from the given point layer.
