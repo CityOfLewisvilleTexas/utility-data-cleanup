@@ -50,17 +50,12 @@ def get_buffer_feature_layer(gis, item_title=None, point_layer=None, buffer_dist
     search_results = gis.content.search(item_title, item_type="Feature Service", max_items=1)
     logger.info(f"Found {len(search_results)} search results for item title: {item_title}")
     if search_results:
-        # query() returns a FeatureSet
-        #buffer_feature_set = search_results[0].layers[0].query(where="1=1", return_geometry=True)
         buffer_feature_layer = search_results[0].layers[0]
     else:
         # create_buffers() returns a FeatureLayer
         buffer_feature_layer = use_proximity.create_buffers(point_layer, distances=[buffer_distance], units="Feet", output_name=item_title)
     buffer_feature_set = buffer_feature_layer.query(where="1=1", return_geometry=False)
     logger.info(f"Buffer feature layer contains {len(buffer_feature_set.features)} features.")
-    # TODO - clean this up if feature layer works as expected
-    #buffer_feature_set = FeatureSet.from_dict({buffer_feature_layer})
-    #return buffer_feature_set
     logger.debug(f"type of buffer_feature_layer: {type(buffer_feature_layer)}")
     return buffer_feature_layer
 
@@ -99,8 +94,8 @@ def get_point_distance(p1: Point, p2: Point) -> float:
 def get_nearest_point(point: Point, point_list: list) -> Point:
     """
     Find the nearest point in the point layer to the given point that is also within the specified width of the buffer.
-    :param point: Point - the point to find the nearest neighbor for
-    :param point_list: list of Point objects - the list containing candidate points
+    :param point: Point - the line endpoint to find the nearest neighbor for
+    :param point_list: list of Point objects - the list containing candidate points (utility point features)
     :return: Point - the nearest point found, or None if no points are in the layer
     """
     nearest_point = None
@@ -108,12 +103,9 @@ def get_nearest_point(point: Point, point_list: list) -> Point:
     logger.debug(f'point IN QUESTION: {(point)}')
     for candidate in point_list:
         logger.debug(f'candidate: {(candidate)}')
-        #distance = get_point_distance(point, candidate.geometry)
         distance = get_point_distance(point, candidate)
         if distance < min_distance:
-        #if distance < min_distance and distance <= (BUFFER_WIDTH_FEET * 3.31e-6):
             min_distance = distance
-            #nearest_point = candidate.geometry
             nearest_point = candidate
     if min_distance > BUFFER_WIDTH_FEET * CONVERSION_FACTOR_FEET_TO_DEGREES:
         nearest_point = None
@@ -121,12 +113,12 @@ def get_nearest_point(point: Point, point_list: list) -> Point:
     return nearest_point
 
 
-def is_snapped(endpoint: Point, target_point: Point, tolerance: float = 0.000001) -> bool:
+def is_snapped(endpoint: Point, target_point: Point, tolerance: float) -> bool:
     """
     Check whether an endpoint is already snapped to the point.
     :param endpoint: Point - the endpoint to check
     :param target_point: Point - the target point to check against
-    :param tolerance: float - the snapping tolerance in feet
+    :param tolerance: float - the snapping tolerance in degrees
     :return: bool - True if the endpoint is within the tolerance of the point, False otherwise
     """
     distance = get_point_distance(endpoint, target_point)
@@ -163,8 +155,6 @@ def get_intersecting_buffer_features(line_feature, buffer_layer):
     :return: list of intersecting buffer features
     """
     line_geom = line_feature.geometry
-    #for buffer_feature in buffer_feature_set.features:
-    #buffer_geom = buffer_feature.geometry
     query_filter = intersects(line_geom)
     intersecting_buffers = buffer_layer.query(geometry_filter=query_filter,
                                           return_geometry=True,
@@ -181,8 +171,6 @@ def get_points_in_buffer(point_layer, buffer_feature):
     :return: list of points within the buffer
     """
     buffer_geom = buffer_feature.geometry
-    # using within(), script does not throw an error but returns empty list
-    #query_filter = within(buffer_geom)
     query_filter = intersects(buffer_geom)
     features = point_layer.query(geometry_filter=query_filter,
                               return_geometry=True,
@@ -210,13 +198,10 @@ def process_endpoint(line_feature: Feature, endpoint: Point, endpoint_index: int
     updated = False
     ep_in_question = None
     target_points = []
-    #endpoint_buffer_list = []
     for buffer_feature in buffer_features:
         if within(endpoint, buffer_feature.geometry):
             ep_in_question = endpoint
-            # adding one or two utility point features here...but if endpoint is not inside buffer, it should not be snapped to a utility point
             target_points = target_points + get_points_in_buffer(point_layer, buffer_feature)
-            #endpoint_buffer_list.append(buffer_feature)
     if ep_in_question and target_points:
         # Snap the endpoint to the nearest target point
         nearest_point = get_nearest_point(ep_in_question, target_points)
@@ -247,7 +232,6 @@ def process_line(line_feature, buffer_layer, point_layer, snap_tolerance_feet: f
         logger.warning("**********Line geometry has no endpoints.**********")
         return (False, line_feature)
     buffer_features = get_intersecting_buffer_features(line_feature, buffer_layer)
-    # TODO - build function from logic for a single endpoint if it works - then feed updated line feature to function to check (and possibly modify) second endpoint
     ep1, ep2 = endpoints[0], endpoints[1]
     snap_tolerance_degrees = get_snap_tolerance_degrees(snap_tolerance_feet)
     ep1_updated, processed_line_feature = process_endpoint(line_feature, ep1, 0, buffer_features, point_layer, snap_tolerance_degrees)
@@ -302,9 +286,9 @@ def main(snap_tolerance_feet=0.01):
             logger.warning(f"Skipping invalid geometry in feature {f.attributes.get('FACILITYID')}")
 
     # TODO - Uncomment to apply updates to the line layer
-    if result_lines:
-        line_layer.edit_features(updates=result_lines)
-        logger.info("Line features updated successfully.")
+    #if result_lines:
+    #    line_layer.edit_features(updates=result_lines)
+    #    logger.info("Line features updated successfully.")
 
     
 if __name__ == "__main__":
