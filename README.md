@@ -1,6 +1,11 @@
-# Utility Flow Direction Assignment
+# Clean Utility Data
 
-TODO - add details on material (PIPE_TYPE) updates to this section, Overview, and Usage - see Kyunghee's branch 'modifications-2-materials'
+A series of scripts to:
+1. snap line endpoints to nearby point features within a specified distance/tolerance
+2. add flow direction to the attribute table of a copy of a line feature layer
+3. add new fields to the attribute tables of copies of line or point feature layers containing information on numbers of connected features and specified attributes of features adjacent to a given feature
+
+TODO - add details on numbers 1 and 3 above including material (PIPE_TYPE) updates to this section, Overview, and Usage - see Kyunghee's branch 'modifications-2-materials'
 
 This script adds direction information to the attribute table of a line feature class - direction is determined using the starting and ending point. While this can be done for any line feature class, a model of utility networks brought about the need for it.
 
@@ -22,8 +27,9 @@ The script operates on geospatial data - a feature class of lines stored in an *
 ## Dependencies
 
 The script requires:
-- **ArcGIS Pro** with **arcpy**
+- **ArcGIS Pro version 3.4** with **arcpy**
 - **Python 3.x** (as used in ArcGIS)
+- **ArcGIS API for Python version 2.4 (for Pro version 3.4)**
 - **dotenv**
 
 ## Usage
