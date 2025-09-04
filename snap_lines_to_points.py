@@ -14,9 +14,11 @@ for now:
 
 # --- CONFIG ---
 GIS_LOGIN = "home"
-LINE_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D1/FeatureServer/1"
-POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D1/FeatureServer/0"
-# lines in Sanitary_Sewer_Subset_D have been modified by this script
+LINE_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Copy/FeatureServer/12"
+POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Copy/FeatureServer/11"
+# lines below have been modified by this script
+#LINE_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D1/FeatureServer/1"
+#POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D1/FeatureServer/0"
 #LINE_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D/FeatureServer/1"
 #POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D/FeatureServer/0"
 
@@ -34,26 +36,35 @@ def get_snap_tolerance_degrees(snap_tolerance_feet: float) -> float:
     """
     Convert snap tolerance from feet to degrees for City of Lewisville.
     """
-    return snap_tolerance_feet * CONVERSION_FACTOR_FEET_TO_DEGREES
+    snap_tolerance_degrees = snap_tolerance_feet * CONVERSION_FACTOR_FEET_TO_DEGREES
+    logger.info(f"Snap tolerance: {snap_tolerance_feet} feet in degrees: {snap_tolerance_degrees}")   
+    return snap_tolerance_degrees
 
 
-def get_buffer_feature_layer(gis, item_title=None, point_layer=None, buffer_distance=None):
+def get_buffer_feature_layer(gis, item_id=None, point_layer=None, buffer_distance=None):
     """
     Return a FeatureLayer of buffered features from the specified item in ArcGIS Online or a new buffer created from the given point layer.
+    Requires either item_id OR point_layer and buffer_distance to be specified
     :param gis: GIS object - the GIS connection to use
-    :param item_title: str or None - title of the existing item to fetch, if None, item will be created
+    :param item_id: str or None - item id of the existing item to fetch, if None, item will be created using other arguments
     :param point_layer: FeatureLayer or None - if provided, will use this layer to create buffers
     :param buffer_distance: float or None - distance in feet to create buffers, can be None if using an existing item
     :return: FeatureLayer or None if item not found
     """
-    search_results = gis.content.search(item_title, item_type="Feature Service", max_items=1)
-    logger.info(f"Found {len(search_results)} search results for item title: {item_title}")
-    if search_results:
-        buffer_feature_layer = search_results[0].layers[0]
+    if not item_id and (not point_layer or not buffer_distance):
+        logger.error("Either item_id or (point_layer and buffer_distance) must be specified.")
+        return None
+    if item_id:
+        item = gis.content.get(item_id)
+        # TODO - use item id rather than title as service definition could also be returned in search_results
+        if item:
+            buffer_feature_layer = item.layers[0]
     else:
-        # create_buffers() returns a FeatureLayer
-        buffer_feature_layer = use_proximity.create_buffers(point_layer, distances=[buffer_distance], units="Feet", output_name=item_title)
+        # create_buffers() returns a FeatureLayer (in version 2.4 of API) - 9/2/25 using Pro 3.5.2 (2.5 of API), returning a FeatureCollection
+        buffer_feature_layer = use_proximity.create_buffers(point_layer, distances=[buffer_distance], units="Feet", output_name=item_id)
     buffer_feature_set = buffer_feature_layer.query(where="1=1", return_geometry=False)
+    # for use with Pro 3.5.2 (2.5 of API)
+    #buffer_feature_set = buffer_feature_layer.properties.featureSet
     logger.info(f"Buffer feature layer contains {len(buffer_feature_set.features)} features.")
     logger.debug(f"type of buffer_feature_layer: {type(buffer_feature_layer)}")
     return buffer_feature_layer
@@ -169,11 +180,16 @@ def get_points_in_buffer(point_layer, buffer_feature):
     :param buffer_feature: Feature object - the buffer feature to check against
     :return: list of points within the buffer
     """
+    logger.debug("Entered get_points_in_buffer()")
     buffer_geom = buffer_feature.geometry
     query_filter = intersects(buffer_geom)
-    features = point_layer.query(geometry_filter=query_filter,
-                              return_geometry=True,
-                              out_fields="*").features
+    logger.debug("Attempting to get point(s) within buffer.")
+    query_result = point_layer.query(geometry_filter=query_filter,
+                              return_geometry=True, out_fields = [])
+    #features = point_layer.query(geometry_filter=query_filter,
+    #                          return_geometry=True, out_fields = []).features
+    #                          #out_fields="*").features
+    features = query_result.features
     # convert features to Points
     points = [Point({"x": f.geometry['x'], "y": f.geometry['y'], "spatialReference": f.geometry['spatialReference']}) for f in features]
     logger.debug(f"Points within buffer: {points}")
@@ -252,12 +268,14 @@ def main(snap_tolerance_feet=0.01):
     line_layer = FeatureLayer(LINE_URL)
     point_layer = FeatureLayer(POINT_URL)
 
-    buffer_feature_layer = get_buffer_feature_layer(gis, item_title='Test_buffer_around_subset_d_points', point_layer=point_layer, buffer_distance=BUFFER_WIDTH_FEET)
+    # passing id for 'Simplified Sewer Point Buffer 1 Foot as of 20250902 1216pm'
+    buffer_feature_layer = get_buffer_feature_layer(gis, item_id='558bbf511c1749669dec0ded02501da1')
+    #buffer_feature_layer = get_buffer_feature_layer(gis, item_id=None, point_layer=point_layer, buffer_distance=BUFFER_WIDTH_FEET)
     result_lines = []
     updated_count = 0
 
     line_feature_set = line_layer.query(return_geometry=True)
-
+    updated_line_facility_ids = []
     for line_feature in line_feature_set.features:
         line_fid = line_feature.attributes.get('FACILITYID')
         # TODO - remove if-statement after testing
@@ -268,15 +286,18 @@ def main(snap_tolerance_feet=0.01):
         if line_updated:
             updated_count += 1
             result_lines.append(processed_line)
-            logger.debug(f"Geometry of UPDATED line feature {processed_line.attributes.get('FACILITYID')}: {processed_line.geometry}")
-            logger.debug(f"Attributes of UPDATED line feature {processed_line.attributes.get('FACILITYID')}: {processed_line.attributes}")
+            updated_line_facility_id = processed_line.attributes.get('FACILITYID')
+            updated_line_facility_ids.append(updated_line_facility_id)
+            logger.debug(f"Geometry of UPDATED line feature {updated_line_facility_id}: {processed_line.geometry}")
+            logger.debug(f"Attributes of UPDATED line feature {updated_line_facility_id}: {processed_line.attributes}")
         else:
             result_lines.append(line_feature)
             logger.debug(f"Geometry of UNCHANGED line feature {line_feature.attributes.get('FACILITYID')}: {line_feature.geometry}")
             logger.debug(f"Attributes of UNCHANGED line feature {line_feature.attributes.get('FACILITYID')}: {line_feature.attributes}")
 
     logger.info(f"Total updated lines to apply: {updated_count}")
-    logger.debug(f"Total number of lines in result_lines: {len(result_lines)}")
+    logger.info(f"Total number of lines in result_lines: {len(result_lines)}")
+    logger.info(f"Facility IDs of lines to be updated: {updated_line_facility_ids}")
 
     # Validate geometries before edit
     for f in result_lines:
@@ -285,9 +306,9 @@ def main(snap_tolerance_feet=0.01):
             logger.warning(f"Skipping invalid geometry in feature {f.attributes.get('FACILITYID')}")
 
     # TODO - Uncomment to apply updates to the line layer
-    #if result_lines:
-    #    line_layer.edit_features(updates=result_lines)
-    #    logger.info("Line features updated successfully.")
+    if result_lines:
+        line_layer.edit_features(updates=result_lines)
+        logger.info("Line features updated successfully.")
 
     
 if __name__ == "__main__":
