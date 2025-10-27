@@ -16,17 +16,9 @@ for now:
 
 # --- CONFIG ---
 GIS_LOGIN = "home"
-POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Copy_2/FeatureServer/5"
-LINE_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Copy_2/FeatureServer/4"
-# lines below have been modified by this script
-#LINE_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D1/FeatureServer/1"
-#POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D1/FeatureServer/0"
-#LINE_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D/FeatureServer/1"
-#POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D/FeatureServer/0"
-#LINE_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Copy/FeatureServer/12"
-#POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Copy/FeatureServer/11"
-#POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D2/FeatureServer/1"
-#LINE_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D2/FeatureServer/0"
+# TODO - replace with actual URLs
+POINT_URL = "https://services2.arcgis.com/..."
+LINE_URL = "https://services2.arcgis.com/..."
 
 
 # TODO - remove constants if not necessary or get_snap_tolerance_degrees()
@@ -67,6 +59,7 @@ def get_buffer_feature_layer(gis, item_id=None, point_layer=None, buffer_distanc
     else:
         # create_buffers() returns a FeatureLayer (in version 2.4 of API) - 9/2/25 using Pro 3.5.2 (2.5 of API), returning a FeatureCollection
         buffer_feature_layer = use_proximity.create_buffers(point_layer, distances=[buffer_distance], units="Feet", output_name=item_id)
+    # TODO - add error handling
     try:
         buffer_feature_set = buffer_feature_layer.query(where="1=1", return_geometry=False)
     except Exception as e:
