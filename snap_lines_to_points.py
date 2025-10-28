@@ -303,54 +303,33 @@ def main(snap_tolerance_feet=0.01):
     buffer_item_id = '558bbf511c1749669dec0ded02501da1'
     buffer_feature_layer = get_buffer_feature_layer(gis, item_id=buffer_item_id)
     #buffer_feature_layer = get_buffer_feature_layer(gis, item_id=None, point_layer=point_layer, buffer_distance=BUFFER_WIDTH_FEET)
-    result_lines = []
-    updated_count = 0
     line_feature_set = line_layer.query(return_geometry=True)
     updated_line_facility_ids = []
     skipped_line_facility_ids = []
+    # Only collect features actually updated
+    updated_features = []
+    updated_count = 0  
+
     for line_feature in line_feature_set.features:
         line_fid = line_feature.attributes.get('FACILITYID')
-        # TODO - remove if-statement after testing
-        #if line_fid == 'SS.SL.00038028':
         logger.info(f"\nProcessing line feature: {line_fid}")
-        line_updated = False
+        
         try:
-            line_updated, processed_line = process_line(line_feature, buffer_feature_layer, point_layer, snap_tolerance_feet)
+            line_updated, processed_line = process_line(line_feature, buffer_feature_layer, 
+                                                        point_layer, snap_tolerance_feet)
+            if line_updated:
+                updated_count += 1
+                updated_features.append(processed_line)  # Only append if updated
+                updated_line_facility_ids.append(line_fid)
         except Exception as e:
             skipped_line_facility_ids.append(line_fid)
             logger.warning(f"Error processing line feature {line_fid}: {e}")
-        if line_updated:
-            updated_count += 1
-            result_lines.append(processed_line)
-            updated_line_facility_id = processed_line.attributes.get('FACILITYID')
-            updated_line_facility_ids.append(updated_line_facility_id)
-            logger.debug(f"Geometry of UPDATED line feature {updated_line_facility_id}: {processed_line.geometry}")
-            logger.debug(f"Attributes of UPDATED line feature {updated_line_facility_id}: {processed_line.attributes}")
-        else:
-            result_lines.append(line_feature)
-            logger.debug(f"Geometry of UNCHANGED line feature {line_feature.attributes.get('FACILITYID')}: {line_feature.geometry}")
-            logger.debug(f"Attributes of UNCHANGED line feature {line_feature.attributes.get('FACILITYID')}: {line_feature.attributes}")
 
     logger.info(f"Total updated lines to apply: {updated_count}")
-    logger.info(f"Total number of lines in result_lines: {len(result_lines)}")
     logger.info(f"Facility IDs of lines to be updated: {updated_line_facility_ids}")
-    logger.info(f"Facility IDs of lines skipped due to errors: {skipped_line_facility_ids}")
 
-    # Validate geometries before edit
-    for f in result_lines:
-        try:
-            geom = f.geometry
-            if not geom or 'paths' not in geom or not geom['paths'] or len(geom['paths'][0]) < 2:
-                logger.warning(f"Skipping invalid geometry in feature {f.attributes.get('FACILITYID')}")
-            if len(geom['paths'][0]) > 2:
-                logger.warning(f"Feature {f.attributes.get('FACILITYID')} has more than 2 points in its path: {geom['paths'][0]}")
-        except Exception as e:
-            logger.error(f"Error validating geometry for feature {f.attributes.get('FACILITYID')}: {e}")
-
-    # comment out the block below for testing if edits should not be applied
-    if result_lines:
-        batch_edit_features(line_layer, result_lines)
-        logger.info("All batches processed.")
+    if updated_features:
+        batch_edit_features(line_layer, updated_features)
 
     
 if __name__ == "__main__":
