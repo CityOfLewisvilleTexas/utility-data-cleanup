@@ -16,9 +16,12 @@ for now:
 
 # --- CONFIG ---
 GIS_LOGIN = "home"
-POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Copy_2/FeatureServer/5"
-LINE_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Copy_2/FeatureServer/4"
+POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Copy_3/FeatureServer/0"
+LINE_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Copy_3/FeatureServer/1"
+
 # lines below have been modified by this script
+#POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Copy_2/FeatureServer/5"
+#LINE_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Copy_2/FeatureServer/4"
 #LINE_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D1/FeatureServer/1"
 #POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D1/FeatureServer/0"
 #LINE_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/Sanitary_Sewer_Subset_D/FeatureServer/1"
@@ -160,11 +163,11 @@ def snap_endpoint_to_point(line_feature, endpoint_index, new_point: Point):
     # are some line segments made up of more than 2 points???
     logger.debug(f"Original path before snapping: {path}")
     # no functional change between four lines below and last version, just cleaner
-    # TODO - adjust rounding if necessary - may need to explicitly round coordinates here to ensure updates are detected by AGO
+    # TODO - add rounding back if necessary - may need to explicitly round coordinates here to ensure updates are detected by AGO
     if endpoint_index == 0:
-        path[0] = [round(new_point.x, 8), round(new_point.y, 8)]
+        path[0] = [new_point.x, new_point.y]
     else:
-        path[-1] = [round(new_point.x, 8), round(new_point.y, 8)]
+        path[-1] = [new_point.x, new_point.y]
     line_feature.geometry = {"paths": [path], "spatialReference": line_feature.geometry['spatialReference']}
     return line_feature
 
