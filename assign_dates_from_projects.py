@@ -140,6 +140,93 @@ def parse_date_series(date_series: pd.Series) -> pd.Series:
     return dt
 
 
+def prepare_table_b_mode_date_lookup(
+    df_b: pd.DataFrame,
+    join_field_b: str,
+    date_field_b: str,
+    output_date_field_name: str,
+    tie_break: str = "earliest"
+) -> pd.DataFrame:
+    """
+    Build a lookup table from Table B containing one row per join value
+    with the MOST FREQUENTLY OCCURRING valid date found in `date_field_b`.
+
+    If multiple dates are tied for most frequent, tie_break determines which
+    date is chosen:
+      - "earliest" (default): choose the earliest among the tied dates
+      - "latest": choose the latest among the tied dates
+
+    Parameters
+    ----------
+    df_b : pd.DataFrame
+        Source Table B.
+    join_field_b : str
+        Join key column in Table B.
+    date_field_b : str
+        Date field in Table B to parse and reduce.
+    output_date_field_name : str
+        Name of the resulting chosen date column (e.g., 'MODE_AsBuiltDate').
+    tie_break : str, optional
+        Tie-breaking rule for equally frequent dates ("earliest" or "latest").
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with [join_field_b, output_date_field_name].
+    """
+    df_b_copy = df_b.copy()
+
+    # Normalize join field in B
+    df_b_copy[join_field_b] = df_b_copy[join_field_b].astype(str).str.strip()
+    df_b_copy.loc[df_b_copy[join_field_b].isin(["", "nan", "None"]), join_field_b] = pd.NA
+    df_b_copy = df_b_copy[df_b_copy[join_field_b].notna()].copy()
+
+    # Parse dates
+    df_b_copy["_parsed_date"] = parse_date_series(df_b_copy[date_field_b])
+    df_b_with_dates = df_b_copy[df_b_copy["_parsed_date"].notna()].copy()
+
+    if df_b_with_dates.empty:
+        return pd.DataFrame(columns=[join_field_b, output_date_field_name])
+
+    # Count occurrences of each date per join key
+    counts = (
+        df_b_with_dates
+        .groupby([join_field_b, "_parsed_date"])
+        .size()
+        .reset_index(name="date_count")
+    )
+
+    # For each join key, pick the date with max count, then break ties deterministically
+    if tie_break not in ("earliest", "latest"):
+        raise ValueError("tie_break must be 'earliest' or 'latest'.")
+
+    # Sort so the "best" row per project is first:
+    # - highest frequency first (descending)
+    # - then earliest or latest date depending on tie_break
+    if tie_break == "earliest":
+        counts = counts.sort_values(
+            by=[join_field_b, "date_count", "_parsed_date"],
+            ascending=[True, False, True]
+        )
+    else:  # latest
+        counts = counts.sort_values(
+            by=[join_field_b, "date_count", "_parsed_date"],
+            ascending=[True, False, False]
+        )
+
+    # Take first row per join key after sorting
+    mode_dates = (
+        counts
+        .groupby(join_field_b, as_index=False)
+        .first()
+        .rename(columns={"_parsed_date": output_date_field_name})
+        [[join_field_b, output_date_field_name]]
+    )
+
+    return mode_dates
+
+
+# TODO - remove if unused?
 def prepare_table_b_earliest_date_lookup(
     df_b: pd.DataFrame,
     join_field_b: str,
@@ -364,18 +451,19 @@ def process_csv_files(
 
     # Step 3: loop through date field pairs in priority order
     for date_field_b, source_value in date_field_pairs:
-        earliest_col = f"EARLIEST_{date_field_b}"
+        lookup_col = f"MODE_{date_field_b}"
 
         if date_field_b not in df_b.columns:
             print(f"WARNING: Table B does not have field '{date_field_b}'. Skipping.")
             continue
 
-        # Build earliest lookup for this date field
-        lookup = prepare_table_b_earliest_date_lookup(
+        # Build mode (most frequently-occurring) lookup for this date field
+        lookup = prepare_table_b_mode_date_lookup(
             df_b=df_b,
             join_field_b=join_field_b,
             date_field_b=date_field_b,
-            output_date_field_name=earliest_col
+            output_date_field_name=lookup_col,
+            tie_break="earliest"
         )
 
         print(f"Lookup built for {date_field_b}: {len(lookup)} project rows with valid dates")
@@ -394,7 +482,7 @@ def process_csv_files(
         df_working = update_dates_conditionally(
             df_working,
             date_field_a=date_field_a,
-            date_field_b=earliest_col,
+            date_field_b=lookup_col,
             source_field=source_field_name,
             source_field_value=source_value
         )
@@ -403,7 +491,7 @@ def process_csv_files(
         print(f"Applied {date_field_b} -> updated {(after_count - before_count)} records")
 
         # Optionally drop the lookup column to keep output clean
-        df_working = df_working.drop(columns=[earliest_col, join_field_b], errors="ignore")
+        df_working = df_working.drop(columns=[lookup_col, join_field_b], errors="ignore")
 
     # Step 4: Optional save
     if output_file:
@@ -418,12 +506,12 @@ if __name__ == "__main__":
     csv_file_b = os.path.join(dirname, r'csv\as-built-project-table-20251217.csv')
 
     # sewer lines
-    #csv_file_a = os.path.join(dirname, r'csv\sewer-lines-table-20260106.csv')
-    #output_file = os.path.join(dirname, r'csv\sewer-lines-table-20260106-updated.csv')
+    csv_file_a = os.path.join(dirname, r'csv\sewer-lines-table-20260106.csv')
+    output_file = os.path.join(dirname, r'csv\sewer-lines-table-20260106-updated-with-mode-dates.csv')
 
     # water lines
-    csv_file_a = os.path.join(dirname, r'csv\water-lines-table-20260106.csv')
-    output_file = os.path.join(dirname, r'csv\water-lines-table-20260106-updated.csv')
+    #csv_file_a = os.path.join(dirname, r'csv\water-lines-table-20260106.csv')
+    #output_file = os.path.join(dirname, r'csv\water-lines-table-20260106-updated-with-mode-dates.csv')
 
     join_field_a = 'PROJECT'
     join_field_b = 'ProjectNumber'
