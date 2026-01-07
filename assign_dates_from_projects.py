@@ -1,24 +1,24 @@
 import os
 import pandas as pd
 import re
-from typing import Optional
+from typing import Optional, Union, List, Tuple, Dict
 from pathlib import Path
 
 
 def read_csv_to_dataframe(file_path: str) -> pd.DataFrame:
     """
     Read a CSV file and convert it to a pandas DataFrame.
-    
+
     Parameters
     ----------
     file_path : str
         Path to the CSV file to be read.
-    
+
     Returns
     -------
     pd.DataFrame
         DataFrame containing the CSV data.
-    
+
     Raises
     ------
     FileNotFoundError
@@ -27,7 +27,7 @@ def read_csv_to_dataframe(file_path: str) -> pd.DataFrame:
     path = Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
-    
+
     return pd.read_csv(file_path)
 
 
@@ -40,11 +40,11 @@ def join_dataframes(
 ) -> pd.DataFrame:
     """
     Join two DataFrames on specified columns.
-    
+
     Table A contains non-unique values in the join field (many side),
-    while Table B contains unique values (one side), creating a 
+    while Table B contains unique values (one side), creating a
     many-to-one or one-to-many relationship.
-    
+
     Parameters
     ----------
     df_a : pd.DataFrame
@@ -58,12 +58,12 @@ def join_dataframes(
     how : str, optional
         Type of join operation ('left', 'right', 'inner', 'outer').
         Default is 'left'.
-    
+
     Returns
     -------
     pd.DataFrame
         Joined DataFrame.
-    
+
     Raises
     ------
     ValueError
@@ -73,7 +73,7 @@ def join_dataframes(
         raise ValueError(f"Column '{join_field_a}' not found in Table A")
     if join_field_b not in df_b.columns:
         raise ValueError(f"Column '{join_field_b}' not found in Table B")
-    
+
     return df_a.merge(
         df_b,
         left_on=join_field_a,
@@ -85,7 +85,7 @@ def join_dataframes(
 
 def parse_date_series(date_series: pd.Series) -> pd.Series:
     """
-    Parse date values from Table B into pandas datetime.
+    Parse date values from a text field into pandas datetime.
 
     Handles:
     - NULL / blank / '-' placeholders
@@ -140,7 +140,32 @@ def parse_date_series(date_series: pd.Series) -> pd.Series:
     return dt
 
 
-def prepare_table_b_with_earliest_dates(df_b, join_field_b, date_field_b):
+def prepare_table_b_earliest_date_lookup(
+    df_b: pd.DataFrame,
+    join_field_b: str,
+    date_field_b: str,
+    output_date_field_name: str
+) -> pd.DataFrame:
+    """
+    Build a lookup table from Table B containing one row per join value
+    with the earliest valid date found in `date_field_b`.
+
+    Parameters
+    ----------
+    df_b : pd.DataFrame
+        Source Table B.
+    join_field_b : str
+        Join key column in Table B.
+    date_field_b : str
+        Date field in Table B to parse and reduce.
+    output_date_field_name : str
+        Name of the resulting earliest date column (e.g., 'EARLIEST_AsBuiltDate').
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with [join_field_b, output_date_field_name].
+    """
     df_b_copy = df_b.copy()
 
     # Normalize join field in B
@@ -148,27 +173,48 @@ def prepare_table_b_with_earliest_dates(df_b, join_field_b, date_field_b):
     df_b_copy.loc[df_b_copy[join_field_b].isin(["", "nan", "None"]), join_field_b] = pd.NA
     df_b_copy = df_b_copy[df_b_copy[join_field_b].notna()].copy()
 
-    print(f"Table B records after removing null join values: {len(df_b_copy)}")
-
-    # Parse dates robustly
+    # Parse dates
     df_b_copy["_parsed_date"] = parse_date_series(df_b_copy[date_field_b])
 
     df_b_with_dates = df_b_copy[df_b_copy["_parsed_date"].notna()].copy()
-
-    print(f"Table B records with valid dates: {len(df_b_with_dates)}")
-    print(f"Unique join values with valid dates: {df_b_with_dates[join_field_b].nunique()}")
 
     # Earliest parsed date per join key
     earliest = (
         df_b_with_dates
         .groupby(join_field_b, as_index=False)["_parsed_date"]
         .min()
-        .rename(columns={"_parsed_date": "EARLIEST_DATE"})
+        .rename(columns={"_parsed_date": output_date_field_name})
     )
 
-    print(f"Groups after getting earliest date per join value: {len(earliest)}")
     return earliest
 
+
+def add_source_field(
+    df: pd.DataFrame,
+    source_field_name: str,
+    default_value: str = ''
+) -> pd.DataFrame:
+    """
+    Add a new text field to store data source explanation.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame to add the field to.
+    source_field_name : str
+        Name of the new source field to be created.
+    default_value : str, optional
+        Default value for the new field. Default is empty string.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with the new source field added.
+    """
+    df_result = df.copy()
+    if source_field_name not in df_result.columns:
+        df_result[source_field_name] = default_value
+    return df_result
 
 
 def update_dates_conditionally(
@@ -184,131 +230,59 @@ def update_dates_conditionally(
     """
     df_result = df.copy()
 
-    print(f"\n=== Diagnostic Info ===")
-    print(f"Total records in joined table: {len(df_result)}")
-
     # Normalize A date field (treat blank/NaN/'NaN' as null)
     a_raw = df_result[date_field_a].astype(str).str.strip()
     a_raw = a_raw.replace({'': pd.NA, 'NaN': pd.NA, 'nan': pd.NA, 'None': pd.NA})
     df_result['_a_dt'] = pd.to_datetime(a_raw, errors='coerce')
+
     # remove dates with years in the future (TODO: do this by date, not just year?)
     current_year = pd.Timestamp.now().year
     df_result['_a_dt'] = df_result['_a_dt'].where(
         df_result['_a_dt'].dt.year.between(1900, current_year + 1)
-        )
+    )
 
-    # Normalize B date field
-    #b_raw = df_result[date_field_b].astype(str).str.strip()
-    #b_raw = b_raw.replace({'': pd.NA, '-': pd.NA, 'NaN': pd.NA, 'nan': pd.NA, 'None': pd.NA})
-    #df_result['_b_dt'] = pd.to_datetime(b_raw, errors='coerce', infer_datetime_format=True)
+    # date_field_b should already be a datetime column, but coerce just in case
     df_result["_b_dt"] = pd.to_datetime(df_result[date_field_b], errors="coerce")
 
-    print(f"Records where {date_field_a} is null after conversion: {df_result['_a_dt'].isna().sum()}")
-    print(f"Records where {date_field_b} has valid datetime: {df_result['_b_dt'].notna().sum()}")
-
-    # A needs update if missing AND B has a valid earliest date
     needs_update = df_result['_a_dt'].isna() & df_result['_b_dt'].notna()
-
-    print(f"Records that need update: {needs_update.sum()}")
 
     # Apply updates
     df_result.loc[needs_update, date_field_a] = df_result.loc[needs_update, '_b_dt'].dt.strftime('%Y-%m-%d')
     df_result.loc[needs_update, source_field] = source_field_value
-
-    updated_count = needs_update.sum()
-    print(f"Records actually updated: {updated_count}")
-    print(f"=== End Diagnostic Info ===\n")
 
     # Cleanup
     df_result = df_result.drop(columns=['_a_dt', '_b_dt'])
     return df_result
 
 
-def diagnose_data_issues(
-    csv_file_a: str,
-    csv_file_b: str,
-    join_field_a: str,
-    join_field_b: str,
-    date_field_a: str,
-    date_field_b: str
-):
+def _normalize_date_field_config(
+    date_field_config: Union[
+        Dict[str, str],
+        List[Tuple[str, str]]
+    ]
+) -> List[Tuple[str, str]]:
     """
-    Diagnostic function to understand data structure and potential issues.
-    
+    Normalize a dict or list config into a list of (date_field_b, source_field_value)
+    preserving user-specified ordering.
+
     Parameters
     ----------
-    csv_file_a : str
-        Path to CSV file A.
-    csv_file_b : str
-        Path to CSV file B.
-    join_field_a : str
-        Column name in Table A to join on.
-    join_field_b : str
-        Column name in Table B to join on.
-    date_field_a : str
-        Date field name in Table A.
-    date_field_b : str
-        Date field name in Table B.
-    """
-    df_a = read_csv_to_dataframe(csv_file_a)
-    df_b = read_csv_to_dataframe(csv_file_b)
-    
-    print("=== TABLE A DIAGNOSTICS ===")
-    print(f"Total records: {len(df_a)}")
-    print(f"Unique values in {join_field_a}: {df_a[join_field_a].nunique()}")
-    print(f"Null values in {join_field_a}: {df_a[join_field_a].isna().sum()}")
-    print(f"Null/empty values in {date_field_a}: {df_a[date_field_a].isna().sum()}")
-    print(f"\nSample of {date_field_a} values:")
-    print(df_a[date_field_a].value_counts().head(10))
-    print(f"\nData types:")
-    print(df_a[[join_field_a, date_field_a]].dtypes)
-    
-    print("\n=== TABLE B DIAGNOSTICS ===")
-    print(f"Total records: {len(df_b)}")
-    print(f"Unique values in {join_field_b}: {df_b[join_field_b].nunique()}")
-    print(f"Null values in {join_field_b}: {df_b[join_field_b].isna().sum()}")
-    print(f"Null/empty values in {date_field_b}: {df_b[date_field_b].isna().sum()}")
-    print(f"\nSample of {date_field_b} values:")
-    print(df_b[date_field_b].value_counts().head(10))
-    print(f"\nData types:")
-    print(df_b[[join_field_b, date_field_b]].dtypes)
-    
-    print("\n=== JOIN ANALYSIS ===")
-    # Check how many values in A have matches in B
-    matches = df_a[join_field_a].isin(df_b[join_field_b])
-    print(f"Records in A with matching values in B: {matches.sum()}")
-    print(f"Records in A without matching values in B: {(~matches).sum()}")
-    
-    # Check for duplicates in join fields
-    print(f"\nDuplicate values in A's {join_field_a}: {df_a[join_field_a].duplicated().sum()}")
-    print(f"Duplicate values in B's {join_field_b}: {df_b[join_field_b].duplicated().sum()}")
+    date_field_config : dict or list
+        Either:
+          - dict: {"AsBuiltDate": "Project As-Built Date", "AcceptDate": "Project Accept Date"}
+          - list: [("AsBuiltDate","Project As-Built Date"), ("AcceptDate","Project Accept Date")]
 
-
-def add_source_field(
-    df: pd.DataFrame,
-    source_field_name: str,
-    default_value: str = ''
-) -> pd.DataFrame:
-    """
-    Add a new text field to store data source explanation.
-    
-    Parameters
-    ----------
-    df : pd.DataFrame
-        DataFrame to add the field to.
-    source_field_name : str
-        Name of the new source field to be created.
-    default_value : str, optional
-        Default value for the new field. Default is empty string.
-    
     Returns
     -------
-    pd.DataFrame
-        DataFrame with the new source field added.
+    list of tuples
+        [(date_field_b, source_field_value), ...]
     """
-    df_result = df.copy()
-    df_result[source_field_name] = default_value
-    return df_result
+    if isinstance(date_field_config, dict):
+        return list(date_field_config.items())
+    elif isinstance(date_field_config, list):
+        return date_field_config
+    else:
+        raise ValueError("date_field_config must be a dict or a list of tuples.")
 
 
 def process_csv_files(
@@ -317,17 +291,26 @@ def process_csv_files(
     join_field_a: str,
     join_field_b: str,
     date_field_a: str,
-    date_field_b: str,
+    date_field_config: Union[
+        Dict[str, str],
+        List[Tuple[str, str]]
+    ],
     source_field_name: str,
-    source_field_value: str = 'Project Date',
     output_file: Optional[str] = None
 ) -> pd.DataFrame:
     """
-    Main orchestration function to process two CSV files.
-    
-    Reads two CSV files, joins them, and conditionally updates dates
-    from Table B to Table A based on the earliest date per group.
-    
+    Main orchestration function to process two CSV files, supporting multiple date fields from Table B.
+
+    Workflow:
+    1) Read Table A and normalize join keys.
+    2) Read Table B.
+    3) For each date field in date_field_config:
+        a) Build earliest-date lookup from Table B
+        b) Merge lookup into working dataframe
+        c) Update Table A date field only where it is missing/invalid
+        d) If updated, write the corresponding source label
+    4) Optionally save output.
+
     Parameters
     ----------
     csv_file_a : str
@@ -340,119 +323,130 @@ def process_csv_files(
         Column name in Table B to join on.
     date_field_a : str
         Date field name in Table A to be updated.
-    date_field_b : str
-        Date field name in Table B containing source dates.
+    date_field_config : dict or list of tuples
+        Configuration for using multiple date fields in Table B, in priority order.
+
+        Examples:
+        - dict:
+          {"AsBuiltDate": "Project As-Built Date", "AcceptDate": "Project Accept Date"}
+
+        - list:
+          [("AsBuiltDate","Project As-Built Date"), ("AcceptDate","Project Accept Date")]
+
+        The order matters; earlier fields are used first.
     source_field_name : str
-        Name for the new field explaining data source.
-    source_field_value : str, optional
-        Value to be entered into source_field if date is updated.
-        Default is 'Project Date'.
+        Field in output that describes where the date came from.
     output_file : str, optional
         Path to save the output CSV. If None, file is not saved.
-    
+
     Returns
     -------
     pd.DataFrame
         Processed DataFrame with updated dates and source information.
-    
-    Examples
-    --------
-    >>> result = process_csv_files(
-    ...     'table_a.csv',
-    ...     'table_b.csv',
-    ...     'asset_id',
-    ...     'asset_id',
-    ...     'install_date',
-    ...     'project_date',
-    ...     'date_source',
-    ...     'Project Date'
-    ... )
     """
+    date_field_pairs = _normalize_date_field_config(date_field_config)
+
     # Step 1: Read CSV files
     df_a = read_csv_to_dataframe(csv_file_a)
+
+    # Normalize join field in A
     df_a[join_field_a] = df_a[join_field_a].astype(str).str.strip()
     df_a.loc[df_a[join_field_a].isin(["", "nan", "None"]), join_field_a] = pd.NA
-    # TODO - try commenting out the line below if not getting desired results
     df_a[join_field_a] = df_a[join_field_a].str.replace(r"\.0$", "", regex=True)
 
-
     df_b = read_csv_to_dataframe(csv_file_b)
-    
+
     print(f"Table A records: {len(df_a)}")
     print(f"Table B records: {len(df_b)}")
-    
-    # Step 2: Prepare Table B to have only earliest date per join value
-    df_b_prepared = prepare_table_b_with_earliest_dates(df_b, join_field_b, date_field_b)
-    print(f"Table B after getting earliest dates: {len(df_b_prepared)}")
-    
-    # Step 3: Join dataframes
-    #df_joined = join_dataframes(df_a, df_b_prepared, join_field_a, join_field_b)
-    df_joined = df_a.merge(
-    df_b_prepared,
-    left_on=join_field_a,
-    right_on=join_field_b,
-    how="left"
-    )
-    print(f"Joined table records: {len(df_joined)}")
-    # TODO - remove if unused - check results for project 5395
-    print(df_joined[df_joined['PROJECT'] == '5395'][['PROJECT', 'ASB_DATE', 'EARLIEST_DATE']].head(25))
-    
-    # Step 4: Add source field
-    df_with_source = add_source_field(df_joined, source_field_name)
-    
-    # Step 5: Update dates conditionally
-    df_final = update_dates_conditionally(
-        df_with_source,
-        date_field_a,
-        "EARLIEST_DATE",
-        #date_field_b,
-        #join_field_a,
-        source_field_name,
-        source_field_value
-    )
-    
-    # Optional: Save to file
+
+    # Step 2: start working df and add source field
+    df_working = add_source_field(df_a, source_field_name)
+
+    # Step 3: loop through date field pairs in priority order
+    for date_field_b, source_value in date_field_pairs:
+        earliest_col = f"EARLIEST_{date_field_b}"
+
+        if date_field_b not in df_b.columns:
+            print(f"WARNING: Table B does not have field '{date_field_b}'. Skipping.")
+            continue
+
+        # Build earliest lookup for this date field
+        lookup = prepare_table_b_earliest_date_lookup(
+            df_b=df_b,
+            join_field_b=join_field_b,
+            date_field_b=date_field_b,
+            output_date_field_name=earliest_col
+        )
+
+        print(f"Lookup built for {date_field_b}: {len(lookup)} project rows with valid dates")
+
+        # Merge lookup into working df
+        df_working = df_working.merge(
+            lookup,
+            left_on=join_field_a,
+            right_on=join_field_b,
+            how="left"
+        )
+
+        # Update using this field (only fills missing/invalid in A)
+        before_count = (df_working[source_field_name] == source_value).sum()
+
+        df_working = update_dates_conditionally(
+            df_working,
+            date_field_a=date_field_a,
+            date_field_b=earliest_col,
+            source_field=source_field_name,
+            source_field_value=source_value
+        )
+
+        after_count = (df_working[source_field_name] == source_value).sum()
+        print(f"Applied {date_field_b} -> updated {(after_count - before_count)} records")
+
+        # Optionally drop the lookup column to keep output clean
+        df_working = df_working.drop(columns=[earliest_col, join_field_b], errors="ignore")
+
+    # Step 4: Optional save
     if output_file:
-        df_final.to_csv(output_file, index=False)
+        df_working.to_csv(output_file, index=False)
         print(f"Results saved to {output_file}")
-    
-    return df_final
+
+    return df_working
 
 
 if __name__ == "__main__":
     dirname = os.path.dirname(__file__)
-    # update sewer using as-built dates
-    csv_file_a = os.path.join(dirname, r'csv\sewer-lines-table-20260106.csv')
     csv_file_b = os.path.join(dirname, r'csv\as-built-project-table-20251217.csv')
+
+    # sewer lines
+    #csv_file_a = os.path.join(dirname, r'csv\sewer-lines-table-20260106.csv')
+    #output_file = os.path.join(dirname, r'csv\sewer-lines-table-20260106-updated.csv')
+
+    # water lines
+    csv_file_a = os.path.join(dirname, r'csv\water-lines-table-20260106.csv')
+    output_file = os.path.join(dirname, r'csv\water-lines-table-20260106-updated.csv')
+
     join_field_a = 'PROJECT'
     join_field_b = 'ProjectNumber'
     date_field_a = 'ASB_DATE'
-    date_field_b = 'AsBuiltDate'
-    source_field_name = 'As_Built_Date_Source'
-    source_field_value = 'Project As-Built Date'
-    output_file = os.path.join(dirname, r'csv\sewer-lines-table-20260106-updated-with-asbuilt-dates.csv')
 
-    diagnose_data_issues(
-        csv_file_a=csv_file_a,
-        csv_file_b=csv_file_b,
-        join_field_a=join_field_a,
-        join_field_b=join_field_b,
-        date_field_a=date_field_a,
-        date_field_b=date_field_b
-    )
-        
+    # config can be dict or list but list is safer for all versions of Python (dict ordering is preserved in Python 3.7+):
+    date_field_config = [
+        ("AsBuiltDate", "Project As-Built Date"),
+        ("AcceptDate", "Project Accept Date"),
+    ]
+
+    source_field_name = 'As_Built_Date_Source'
+    
     result = process_csv_files(
         csv_file_a=csv_file_a,
         csv_file_b=csv_file_b,
         join_field_a=join_field_a,
         join_field_b=join_field_b,
         date_field_a=date_field_a,
-        date_field_b=date_field_b,
+        date_field_config=date_field_config,
         source_field_name=source_field_name,
-        source_field_value=source_field_value,
         output_file=output_file
     )
-    
+
     print(f"Processed {len(result)} records")
-    #print(f"Updated {(result['date_source'] == 'Project Date').sum()} dates")
-    print(f"Updated {(result[source_field_name] == source_field_value).sum()} dates")
+    print(f"Updated {(result[source_field_name] != '').sum()} dates")
