@@ -506,12 +506,12 @@ if __name__ == "__main__":
     csv_file_b = os.path.join(dirname, r'csv\as-built-project-table-20251217.csv')
 
     # sewer lines
-    csv_file_a = os.path.join(dirname, r'csv\sewer-lines-table-20260106.csv')
-    output_file = os.path.join(dirname, r'csv\sewer-lines-table-20260106-updated-with-mode-dates.csv')
+    csv_file_a = os.path.join(dirname, r'csv\sewer-lines-table-20260108-1153.csv')
+    output_file = os.path.join(dirname, r'csv\sewer-lines-table-20260108-1153-updated-with-mode-dates.csv')
 
     # water lines
-    #csv_file_a = os.path.join(dirname, r'csv\water-lines-table-20260106.csv')
-    #output_file = os.path.join(dirname, r'csv\water-lines-table-20260106-updated-with-mode-dates.csv')
+    #csv_file_a = os.path.join(dirname, r'csv\water-lines-table-20260107.csv')
+    #output_file = os.path.join(dirname, r'csv\water-lines-table-20260107-updated-with-mode-dates.csv')
 
     join_field_a = 'PROJECT'
     join_field_b = 'ProjectNumber'
