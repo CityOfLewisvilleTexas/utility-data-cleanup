@@ -247,38 +247,48 @@ def run():
         source_field = "PIPE_TYPE"
         from_value_field = "From_Material"
         to_value_field = "To_Material"
-        field_type = "TEXT"
-        field_length = 50
+        field_type = "SHORT"
+        #field_length = 50
         
-        value_map = {
-            1: "PVC",
-            2: "RCP",
-            3: "Cast Iron",
-            4: "Ductile Iron",
-            5: "VCP",
-            6: "R.C.C.P",
-            None: "Unknown",
-            0: "Unknown",
-            "N/A": "Unknown"
-        }
+        #value_map = {
+        #    1: "PVC",
+        #    2: "RCP",
+        #    3: "Cast Iron",
+        #    4: "Ductile Iron",
+        #    5: "VCP",
+        #    6: "R.C.C.P",
+        #    None: "Unknown",
+        #    0: "Unknown",
+        #    "N/A": "Unknown"
+        #}
 
-        add_required_fields(projected_fc, from_value_field, to_value_field, field_type, field_length)
-        calc_results = calculate_adjacent_attributes(projected_fc, id_field_name, source_field, xy_tolerance, value_map)
+        #add_required_fields(projected_fc, from_value_field, to_value_field, field_type)
+        #calc_results = calculate_adjacent_attributes(projected_fc, id_field_name, source_field, xy_tolerance)
 
+    elif attribute_mode == 'OWNER':
+        # Material mode configuration
+        source_field = "OWNER"
+        from_value_field = "From_Owner"
+        to_value_field = "To_Owner"
+        field_type = "SHORT"
+    
     elif attribute_mode == 'DATE':
         # Date mode configuration
         source_field = "ASB_DATE"
         from_value_field = "From_ASB_DATE"
         to_value_field = "To_ASB_DATE"
         field_type = "DATE"
-        value_map = None  # No mapping needed for dates
+        #value_map = None  # No mapping needed for dates
 
-        add_required_fields(projected_fc, from_value_field, to_value_field, field_type)
-        calc_results = calculate_adjacent_attributes(projected_fc, id_field_name, source_field, xy_tolerance, value_map)
+        #add_required_fields(projected_fc, from_value_field, to_value_field, field_type)
+        #calc_results = calculate_adjacent_attributes(projected_fc, id_field_name, source_field, xy_tolerance)
 
     else:
         print(f"Unknown ATTRIBUTE_MODE: {attribute_mode}. Use 'MATERIAL' or 'DATE'.")
         return
+    
+    add_required_fields(projected_fc, from_value_field, to_value_field, field_type)
+    calc_results = calculate_adjacent_attributes(projected_fc, id_field_name, source_field, xy_tolerance)
 
     update_fields(projected_fc, calc_results, from_adjacent_id, to_adjacent_id, from_value_field, to_value_field)
 
