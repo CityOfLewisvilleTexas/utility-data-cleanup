@@ -1,5 +1,4 @@
 import os
-import math
 from dotenv import load_dotenv
 import pathlib
 import arcpy
@@ -16,50 +15,26 @@ def set_environment():
     arcpy.env.workspace = os.getenv('GDB')
 
 
-def get_projected_feature_class(in_fc, out_fc, out_coordinate_system, geographic_transformation):
-    """
-    Project a feature class using the geographic coordinate system WGS84 to a specified coordinate system
-    using the given transformation.
-    :param in_fc: Path to the input feature class.
-    :param out_fc: Path to the output feature class.
-    :param out_coordinate_system: The output coordinate system (SpatialReference object).
-    :param geographic_transformation: The geographic transformation to use.
-    :return: output feature class path
-    """
-    try:
-        arcpy.management.Project(
-            in_dataset=in_fc,
-            out_dataset=out_fc,
-            out_coor_system=out_coordinate_system,
-            transform_method=geographic_transformation,
-            in_coor_system=arcpy.SpatialReference(4326)
-        )
-        print("Projection complete.")
-        return out_fc
-
-    except Exception as e:
-        print(f"Error during projection: {e}")
-        exit()
-
-
-def add_required_fields(feature_class, from_field, to_field, field_type, field_length=None):
+def add_required_fields(feature_class, field_base_name, field_type, field_length=None):
     """
     Add required adjacent attribute fields to the feature class if they don't already exist.
-    Assumes 'from_adjacent_id' and 'to_adjacent_id' already exist.
-    :param feature_class: The projected feature class to check and add fields to.
-    :param from_field: The name of the field for the attribute at the start point.
-    :param to_field: The name of the field for the attribute at the end point.
-    :param field_type: The field type (e.g., 'TEXT', 'DATE').
+    Creates 4 fields each for 'from' and 'to' directions.
+    :param feature_class: The feature class to check and add fields to.
+    :param field_base_name: The base name for the fields (e.g., 'Material', 'ASB_DATE', 'Owner').
+    :param field_type: The field type (e.g., 'TEXT', 'DATE', 'SHORT').
     :param field_length: Optional field length for TEXT fields.
     """
-    print(f"Checking and adding required fields on the projected feature class...")
+    print(f"Checking and adding required fields for {field_base_name}...")
 
     existing_fields = [f.name for f in arcpy.ListFields(feature_class)]
 
-    fields_to_add = {
-        from_field: field_type,
-        to_field: field_type
-    }
+    # Create field names: From_Material_1, From_Material_2, etc.
+    fields_to_add = {}
+    for i in range(1, 5):
+        from_field = f"From_{field_base_name}_{i}"
+        to_field = f"To_{field_base_name}_{i}"
+        fields_to_add[from_field] = field_type
+        fields_to_add[to_field] = field_type
 
     for field_name, ftype in fields_to_add.items():
         if field_name not in existing_fields:
@@ -72,118 +47,93 @@ def add_required_fields(feature_class, from_field, to_field, field_type, field_l
             print(f"Field '{field_name}' already exists.")
 
 
-def calculate_adjacent_attributes(feature_class, id_field, source_field, xy_tolerance, value_map=None):
+def calculate_adjacent_attributes(feature_class, id_field, source_field, value_map=None):
     """
-    Read the feature geometries from the feature class and calculate adjacent IDs and attribute values for each segment.
-    :param feature_class: Path of the projected feature class to read from.
+    Read the feature attributes and look up values from adjacent segments.
+    Expects the feature class to already have from_adjacent_id_1-4 and to_adjacent_id_1-4 fields.
+    :param feature_class: Path of the feature class to read from.
     :param id_field: The name of the unique ID field in the feature class.
     :param source_field: The field containing the source attribute to propagate.
-    :param xy_tolerance: Tolerance for comparing point locations in the projected coordinate system units.
-    :param value_map: Optional dictionary to map source field values (e.g., for materials). If None, values are copied directly.
-    :return: Dictionary keyed by OID with values:
-             { 'from_adjacent_id': ..., 'to_adjacent_id': ..., 'from_value': ..., 'to_value': ... }
+    :param value_map: Optional dictionary to map source field values. If None, values are copied directly.
+    :return: Dictionary keyed by OID with values for from and to attributes (1-4).
     """
-    print(f"Reading projected feature geometries and calculating adjacency for '{source_field}'...")
+    print(f"Reading feature attributes and calculating adjacency for '{source_field}'...")
 
-    # First pass: read geometries & attributes
-    features_data = {}
-    fields_to_read = ['OID@', id_field, 'SHAPE@', source_field]
+    # First pass: build a lookup dictionary of all features by their ID
+    id_to_value = {}
+    fields_to_read = ['OID@', id_field, source_field]
+    
     with arcpy.da.SearchCursor(feature_class, fields_to_read) as cursor:
         for row in cursor:
-            oid, feat_id, shape, source_value = row
-            if shape is None:
-                continue
-            try:
-                start_pt = shape.firstPoint
-                end_pt = shape.lastPoint
-                sx, sy = start_pt.X, start_pt.Y
-                ex, ey = end_pt.X, end_pt.Y
-            except:
-                continue
-            features_data[oid] = {
-                'id': feat_id,
-                'sx': sx, 'sy': sy,
-                'ex': ex, 'ey': ey,
-                'source_value': source_value
-            }
+            oid, feat_id, source_value = row
+            id_to_value[feat_id] = source_value
 
-    print(f"Read and processed {len(features_data)} features.")
+    print(f"Built lookup table with {len(id_to_value)} features.")
 
-    # Build endpoint list for adjacency lookup
-    endpoints = []
-    for oid, data in features_data.items():
-        endpoints.append({'oid': oid, 'x': data['sx'], 'y': data['sy']})
-        endpoints.append({'oid': oid, 'x': data['ex'], 'y': data['ey']})
-
-    # Prepare output dictionary
+    # Second pass: read adjacent IDs and look up their values
     results = {}
-
-    # Second pass: calculate adjacency and values
-    for i, (oid, data) in enumerate(features_data.items()):
-        sx, sy = data['sx'], data['sy']
-        ex, ey = data['ex'], data['ey']
-
-        from_adj = None
-        to_adj = None
-        from_val = None
-        to_val = None
-
-        # Find from_adjacent_id/value
-        for ep in endpoints:
-            if ep['oid'] == oid:
-                continue
-            if math.dist((sx, sy), (ep['x'], ep['y'])) < xy_tolerance:
-                from_adj = features_data[ep['oid']]['id']
-                adj_source = features_data[ep['oid']]['source_value']
-                if value_map is not None:
-                    from_val = value_map.get(adj_source, "Unknown")
+    
+    adjacent_fields = ['OID@']
+    for i in range(1, 5):
+        adjacent_fields.append(f'from_adjacent_id_{i}')
+    for i in range(1, 5):
+        adjacent_fields.append(f'to_adjacent_id_{i}')
+    
+    with arcpy.da.SearchCursor(feature_class, adjacent_fields) as cursor:
+        for row in cursor:
+            oid = row[0]
+            
+            # Get from_adjacent values (indices 1-4 in row)
+            from_values = []
+            for i in range(1, 5):
+                adj_id = row[i]
+                if adj_id is not None and adj_id in id_to_value:
+                    source_val = id_to_value[adj_id]
+                    if value_map is not None:
+                        mapped_val = value_map.get(source_val, "Unknown")
+                    else:
+                        mapped_val = source_val
+                    from_values.append(mapped_val)
                 else:
-                    from_val = adj_source
-                break
-
-        # Find to_adjacent_id/value
-        for ep in endpoints:
-            if ep['oid'] == oid:
-                continue
-            if math.dist((ex, ey), (ep['x'], ep['y'])) < xy_tolerance:
-                to_adj = features_data[ep['oid']]['id']
-                adj_source = features_data[ep['oid']]['source_value']
-                if value_map is not None:
-                    to_val = value_map.get(adj_source, "Unknown")
+                    from_values.append(None)
+            
+            # Get to_adjacent values (indices 5-8 in row)
+            to_values = []
+            for i in range(5, 9):
+                adj_id = row[i]
+                if adj_id is not None and adj_id in id_to_value:
+                    source_val = id_to_value[adj_id]
+                    if value_map is not None:
+                        mapped_val = value_map.get(source_val, "Unknown")
+                    else:
+                        mapped_val = source_val
+                    to_values.append(mapped_val)
                 else:
-                    to_val = adj_source
-                break
-
-        results[oid] = {
-            'from_adjacent_id': from_adj,
-            'to_adjacent_id': to_adj,
-            'from_value': from_val,
-            'to_value': to_val
-        }
-
-        if (i + 1) % 1000 == 0:
-            print(f"Processed {i + 1} features for adjacency...")
+                    to_values.append(None)
+            
+            results[oid] = {
+                'from_values': from_values,
+                'to_values': to_values
+            }
 
     print(f"Finished calculating adjacency for '{source_field}'.")
     return results
 
 
-def update_fields(feature_class, calc_dict, from_adj_field, to_adj_field, from_value_field, to_value_field):
+def update_fields(feature_class, calc_dict, field_base_name):
     """
     Update the fields in the feature class with the calculated values.
     :param feature_class: The feature class to update.
     :param calc_dict: Dictionary keyed by OID with calculated values.
-    :param from_adj_field: The field name for the start-point adjacent ID.
-    :param to_adj_field: The field name for the end-point adjacent ID.
-    :param from_value_field: The field name for the start-point value.
-    :param to_value_field: The field name for the end-point value.
+    :param field_base_name: The base name for the fields (e.g., 'Material', 'ASB_DATE').
     """
     print("Updating fields in the feature class...")
-    update_fields_list = [
-        'OID@',
-        from_adj_field, to_adj_field,
-        from_value_field, to_value_field
-    ]
+    
+    update_fields_list = ['OID@']
+    for i in range(1, 5):
+        update_fields_list.append(f"From_{field_base_name}_{i}")
+    for i in range(1, 5):
+        update_fields_list.append(f"To_{field_base_name}_{i}")
 
     desc = arcpy.Describe(feature_class)
     editor = arcpy.da.Editor(desc.path)
@@ -199,11 +149,15 @@ def update_fields(feature_class, calc_dict, from_adj_field, to_adj_field, from_v
                 data = calc_dict.get(oid)
 
                 if data:
-                    row[1] = data['from_adjacent_id']
-                    row[2] = data['to_adjacent_id']
-                    row[3] = data['from_value']
-                    row[4] = data['to_value']
+                    # Update from values (indices 1-4)
+                    for i in range(4):
+                        row[i + 1] = data['from_values'][i]
+                    
+                    # Update to values (indices 5-8)
+                    for i in range(4):
+                        row[i + 5] = data['to_values'][i]
                 else:
+                    # Set all to None if no data
                     for idx in range(1, len(update_fields_list)):
                         row[idx] = None
 
@@ -225,72 +179,65 @@ def run():
     input_fc_name = os.getenv('INPUT_FC')
     input_fc = os.path.join(arcpy.env.workspace, input_fc_name)
 
-    spatial_ref_wkid = int(os.getenv('SPATIAL_REF_WKID', 2277))
-    out_coordinate_system = arcpy.SpatialReference(spatial_ref_wkid)
-    geographic_transformation = os.getenv('GEOGRAPHIC_TRANSFORMATION', "WGS_1984_(ITRF00)_To_NAD_1983")
-
-    output_fc_name = f"{input_fc_name}_{spatial_ref_wkid}"
-    projected_fc = get_projected_feature_class(input_fc, output_fc_name,
-                                               out_coordinate_system, geographic_transformation)
+    # Check if input feature class already has adjacent ID fields
+    existing_fields = [f.name for f in arcpy.ListFields(input_fc)]
+    required_adjacent_fields = [f'from_adjacent_id_{i}' for i in range(1, 5)] + \
+                               [f'to_adjacent_id_{i}' for i in range(1, 5)]
+    
+    missing_fields = [f for f in required_adjacent_fields if f not in existing_fields]
+    
+    if missing_fields:
+        print(f"ERROR: Input feature class is missing required adjacent ID fields:")
+        for field in missing_fields:
+            print(f"  - {field}")
+        print("\nPlease run get_flow_direction.py first to create these fields.")
+        return
 
     # Configuration: Set which attribute to propagate
-    # Options: 'MATERIAL' or 'DATE'
     attribute_mode = os.getenv('ATTRIBUTE_MODE', 'DATE').upper()
-
-    from_adjacent_id = "from_adjacent_id"
-    to_adjacent_id = "to_adjacent_id"
     id_field_name = "FACILITYID"
-    xy_tolerance = float(os.getenv('XY_TOLERANCE', 0.001))
 
     if attribute_mode == 'MATERIAL':
-        # Material mode configuration
         source_field = "PIPE_TYPE"
-        from_value_field = "From_Material"
-        to_value_field = "To_Material"
+        field_base_name = "Material"
         field_type = "SHORT"
-        #field_length = 50
+        field_length = None
         
-        #value_map = {
-        #    1: "PVC",
-        #    2: "RCP",
-        #    3: "Cast Iron",
-        #    4: "Ductile Iron",
-        #    5: "VCP",
-        #    6: "R.C.C.P",
-        #    None: "Unknown",
-        #    0: "Unknown",
-        #    "N/A": "Unknown"
-        #}
-
-        #add_required_fields(projected_fc, from_value_field, to_value_field, field_type)
-        #calc_results = calculate_adjacent_attributes(projected_fc, id_field_name, source_field, xy_tolerance)
+        # Optional: Define a value map if you want to convert codes to text
+        # value_map = {
+        #     1: "PVC",
+        #     2: "RCP",
+        #     3: "Cast Iron",
+        #     4: "Ductile Iron",
+        #     5: "VCP",
+        #     6: "R.C.C.P",
+        #     None: "Unknown",
+        #     0: "Unknown"
+        # }
+        # If using value map, change field_type to "TEXT" and set field_length = 50
+        value_map = None
 
     elif attribute_mode == 'OWNER':
-        # Material mode configuration
         source_field = "OWNER"
-        from_value_field = "From_Owner"
-        to_value_field = "To_Owner"
+        field_base_name = "Owner"
         field_type = "SHORT"
+        field_length = None
+        value_map = None
     
     elif attribute_mode == 'DATE':
-        # Date mode configuration
         source_field = "ASB_DATE"
-        from_value_field = "From_ASB_DATE"
-        to_value_field = "To_ASB_DATE"
+        field_base_name = "ASB_DATE"
         field_type = "DATE"
-        #value_map = None  # No mapping needed for dates
-
-        #add_required_fields(projected_fc, from_value_field, to_value_field, field_type)
-        #calc_results = calculate_adjacent_attributes(projected_fc, id_field_name, source_field, xy_tolerance)
+        field_length = None
+        value_map = None
 
     else:
-        print(f"Unknown ATTRIBUTE_MODE: {attribute_mode}. Use 'MATERIAL' or 'DATE' or 'OWNER'.")
+        print(f"Unknown ATTRIBUTE_MODE: {attribute_mode}. Use 'MATERIAL', 'DATE', or 'OWNER'.")
         return
-    
-    add_required_fields(projected_fc, from_value_field, to_value_field, field_type)
-    calc_results = calculate_adjacent_attributes(projected_fc, id_field_name, source_field, xy_tolerance)
 
-    update_fields(projected_fc, calc_results, from_adjacent_id, to_adjacent_id, from_value_field, to_value_field)
+    add_required_fields(input_fc, field_base_name, field_type, field_length)
+    calc_results = calculate_adjacent_attributes(input_fc, id_field_name, source_field, value_map)
+    update_fields(input_fc, calc_results, field_base_name)
 
     print(f"\nScript finished for {attribute_mode} mode.")
 
