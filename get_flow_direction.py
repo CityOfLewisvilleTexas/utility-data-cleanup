@@ -42,14 +42,16 @@ def add_required_fields(feature_class, direction_float_field, direction_text_fie
 
     adj_field_length = 50
 
-    # Create fields for direction and multiple adjacent IDs
+    # Create fields for direction and multiple adjacent IDs (4 each)
     fields_to_add = {
         "from_adjacent_id_1": "TEXT",
         "from_adjacent_id_2": "TEXT",
         "from_adjacent_id_3": "TEXT",
+        "from_adjacent_id_4": "TEXT",
         "to_adjacent_id_1": "TEXT",
         "to_adjacent_id_2": "TEXT",
         "to_adjacent_id_3": "TEXT",
+        "to_adjacent_id_4": "TEXT",
         direction_float_field: "DOUBLE",
         direction_text_field: "TEXT"
     }
@@ -267,8 +269,8 @@ def update_fields(feature_class, feature_data, direction_float_field, direction_
     
     update_field_names = [
         'OID@', 
-        'from_adjacent_id_1', 'from_adjacent_id_2', 'from_adjacent_id_3',
-        'to_adjacent_id_1', 'to_adjacent_id_2', 'to_adjacent_id_3',
+        'from_adjacent_id_1', 'from_adjacent_id_2', 'from_adjacent_id_3', 'from_adjacent_id_4',
+        'to_adjacent_id_1', 'to_adjacent_id_2', 'to_adjacent_id_3', 'to_adjacent_id_4',
         direction_float_field, direction_text_field
     ]
 
@@ -289,28 +291,33 @@ def update_fields(feature_class, feature_data, direction_float_field, direction_
                 calculated_data = feature_data_dict.get(oid)
 
                 if calculated_data:
-                    _, _, _, _, _, _, bearing, direction_text = calculated_data
+                    _, feat_id, _, _, _, _, bearing, direction_text = calculated_data
                     
-                    # Get lists of adjacent IDs
+                    # Get lists of adjacent IDs (already sorted by flow compatibility)
                     from_ids = from_adjacent_ids.get(oid, [])
                     to_ids = to_adjacent_ids.get(oid, [])
                     
-                    # Assign up to 3 from_adjacent_ids
+                    # Assign up to 4 from_adjacent_ids
                     row[1] = from_ids[0] if len(from_ids) > 0 else None
                     row[2] = from_ids[1] if len(from_ids) > 1 else None
                     row[3] = from_ids[2] if len(from_ids) > 2 else None
+                    row[4] = from_ids[3] if len(from_ids) > 3 else None
                     
-                    # Assign up to 3 to_adjacent_ids
-                    row[4] = to_ids[0] if len(to_ids) > 0 else None
-                    row[5] = to_ids[1] if len(to_ids) > 1 else None
-                    row[6] = to_ids[2] if len(to_ids) > 2 else None
+                    # Assign up to 4 to_adjacent_ids
+                    row[5] = to_ids[0] if len(to_ids) > 0 else None
+                    row[6] = to_ids[1] if len(to_ids) > 1 else None
+                    row[7] = to_ids[2] if len(to_ids) > 2 else None
+                    row[8] = to_ids[3] if len(to_ids) > 3 else None
                     
                     # Assign direction values
-                    row[7] = bearing
-                    row[8] = direction_text
+                    row[9] = bearing
+                    row[10] = direction_text
                     
-                    if len(from_ids) > 3 or len(to_ids) > 3:
-                        print(f"Warning: Feature OID {oid} has more than 3 connections at an endpoint")
+                    # Warning for more than 4 connections
+                    if len(from_ids) > 4:
+                        print(f"WARNING: Feature {feat_id} (OID {oid}) has {len(from_ids)} connections at START point (exceeds 4)")
+                    if len(to_ids) > 4:
+                        print(f"WARNING: Feature {feat_id} (OID {oid}) has {len(to_ids)} connections at END point (exceeds 4)")
 
                 else:
                     # Set all fields to None if feature wasn't processed
