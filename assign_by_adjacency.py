@@ -284,7 +284,7 @@ def run():
         #calc_results = calculate_adjacent_attributes(projected_fc, id_field_name, source_field, xy_tolerance)
 
     else:
-        print(f"Unknown ATTRIBUTE_MODE: {attribute_mode}. Use 'MATERIAL' or 'DATE'.")
+        print(f"Unknown ATTRIBUTE_MODE: {attribute_mode}. Use 'MATERIAL' or 'DATE' or 'OWNER'.")
         return
     
     add_required_fields(projected_fc, from_value_field, to_value_field, field_type)
