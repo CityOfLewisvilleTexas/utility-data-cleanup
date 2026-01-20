@@ -44,15 +44,14 @@ The script can be run as a standalone Python script from a terminal (`python pat
 ### Sewer Update Process (Jan 2026)
 
 #### As-Built Dates
-TODO - explain which scripts are used at each step
+TODO - explain which scripts are used at each step (in separate section above - Overview section?)
 1. Assign as-built dates using project numbers (from 'project table' holding data from Laserfiche)
 2. Assign accept dates using project numbers (from 'project table' holding data from Laserfiche)
 3. Assign dates using a spatial join with 'Construction Project Boundaries' layer (as well as a relational join with the 'project table')
-4. Assign dates using a spatial join with the 'Subdivision Average Age' layer - if the 'MinBuilt' date was 1980 or more recent and the size was 15 inches or less, the date of Jan 1 of that year was used (for the few (6-8) that were more than 15 inches, they were populated manually if the dates seemed to fit - otherwise, they were left null)
-5. Assign dates using 'adjacency inference' (based on multiple segments connected to each endpoint)
+4. Assign dates using a spatial join with the 'Subdivision Average Age' layer - if the 'MinBuilt' date was 1970 or more recent and the size was 15 inches or less, the date of Jan 1 of that year was used (for the few (6-8) that were more than 15 inches, they were populated manually if the dates seemed to fit - otherwise, they were left null)
+5. Assign dates using 'adjacency inference' (based on multiple segments connected to each endpoint) TODO - this step still needs to be done - as of 1/16/26, dates were only assigned based on a single adjacent segment on either endpoint of a given line (though these dates were removed before using the '1986 rule' to assign material types).
 
 #### Material Types (PIPE_TYPE)
-TODO - explain which scripts are used at each step
 1. Assign using 1986 rule (explain this)
 2. Assign using adjacency inference (based on multiple segments connected to each endpoint)
 
