@@ -41,19 +41,41 @@ The script requires:
 
 The script can be run as a standalone Python script from a terminal (`python path/to/script.py` or `propy path/to/script.py` if using the 'propy' environment provided with ArcGIS Pro).
 
+### Script Sequence and Outputs
+
+#### Sewer Lines (and probably Water Lines)
+1. assign_dates_from_projects.py - assigns as-built dates and 'accept dates' from a list of projects from Laserfiche - if a single project contains multiple date values, the most commonly-occuring value (mode) is assigned; adds field 'As_Built_Date_Source' and updates field with either 'Project As-Built Date' or 'Project Accept Date'
+
+2. get_flow_direction.py - adds four fields to hold id's of adjacent segments on either side of each segment, populates as many of those fields as possible; also adds fields to hold direction/bearing as both a value between 0 and 360 and a direction abbreviation (N, S, E, W, NE, NW, SE, SW):  
+- from_adjacent_id_1
+- from_adjacent_id_2
+- from_adjacent_id_3
+- from_adjacent_id_4
+- to_adjacent_id_1
+- to_adjacent_id_2
+- to_adjacent_id_3
+- to_adjacent_id_4
+- direction_float_field
+- direction_text_field
+
+3. obtain_adjacent_values.py - adds eight fields to hold results pulled from each of the following source fields: OWNER, PIPE_TYPE (pipe material), ASB_DATE e.g From_Owner_1, From_Owner_2, To_Owner_1, To_Owner_2, etc (with suffixes 1-4),; populates as many of those fields as possible
+
+4. assign_missing_values_from_adjacent.py - if they don't already exist, adds fields 'As_Built_Date_Source' and 'Pipe_Type_Source'; assigns values from fields created and populated by obtain_adjacent_values.py to original fields 'ASB_DATE' and 'PIPE_TYPE' and updates 'As_Built_Date_Source' and 'Pipe_Type_Source' with explanations as to the source of each value e.g. 'Adjacency From-As-Built-Date (Round 1)'. This script can be run in succession to continue to infer values based on inferred values - before doing this, the ADJACENCY_ROUND environment variable should be set to an integer value greater than 1.
+
+
 ### Sewer Update Process (Jan 2026)
 
 #### As-Built Dates and Material Types (PIPE_TYPE)
-TODO - explain which scripts are used at each step (in separate section above - Overview section?)
-1. Assign as-built dates using project numbers (from 'project table' holding data from Laserfiche)
-2. Assign accept dates using project numbers (from 'project table' holding data from Laserfiche)
+See the section above for explanations on the script referenced at some of the steps below. If no script is mentioned for a given step, that step was performed manually in ArcGIS Pro.
+1. Assign as-built dates using project numbers - dates originate from 'project table' holding data from Laserfiche ( assign_dates_from_projects.py) 
+2. Assign accept dates using project numbers - dates originate from 'project table' holding data from Laserfiche (occurs when running assign_dates_from_projects.py in step 1)
 3. Assign dates using a spatial join with 'Construction Project Boundaries' layer (as well as a relational join with the 'project table')
 4. Assign dates using a spatial join with the 'Subdivision Average Age' layer - if the 'MinBuilt' date was 1970 or more recent and the size was 15 inches or less, the date of Jan 1 of that year was used (for the few (6-8) that were more than 15 inches, they were populated manually if the dates seemed to fit - otherwise, they were left null)
-5. Modify all instances were PIPE_TYPE (material type) equals zero - set all values to null.
+5. Modify all instances in input feature class where PIPE_TYPE (material type) equals zero - set all values to null.
 6. Assign material values using 1986 rule (explain this)
-7. Assign both as-built dates and material types using adjacency inference (based on multiple segments connected to each endpoint)
+7. Assign both as-built dates and material types using adjacency inference based on multiple segments connected to each endpoint (obtain_adjacent_values.py and assign_missing_values_from_adjacent.py) 
 8. ?Use 1986 rule again on material types using dates assigned by adjacency inference? (do this and explain to ULM)
-9. Repeat steps 7 and 8 for round 2, 3...?
+9. Repeat steps 7 and 8 for round 2, 3...? (assign_missing_values_from_adjacent.py - 'obtain_adjacent_values.py' does not need to be run again in this case)
 
 ## Output
 
