@@ -54,18 +54,6 @@ def add_source_fields(feature_class):
             print(f"Field '{field_name}' already exists.")
 
 
-def reset_field_values(input_fc: str, fields: list):
-    """
-    Set values of fields in given feature class to null
-    
-    :param input_fc: name of input feature class
-    :param fields: list of strings containing field names
-    """
-    for field in fields:
-        arcpy.management.CalculateField(input_fc, field, 'None', "PYTHON3")
-    print(f"All values in the following fields were set to null: {fields}")
-
-
 def get_non_null_values(values_list):
     """
     Get non-null values from a list and return unique non-null values.
@@ -113,6 +101,47 @@ def check_can_assign(owner_values, attribute_values):
         return (False, None, "city_owned_conflict")
 
 
+def check_can_assign_authoritative(to_owners, from_owners, to_materials, from_materials, authoritative_direction):
+    """
+    Check if we can assign based on authoritative direction when one side has city ownership
+    and the other doesn't.
+    
+    Returns: (can_assign, value_to_assign, reason)
+    """
+    # Get all non-null owners to check for conflicts
+    all_owners = to_owners + from_owners
+    non_null_owners = [o for o in all_owners if o is not None]
+    unique_owners = list(set(non_null_owners))
+    
+    # If there are multiple different owner values across all fields, cannot use this logic
+    if len(unique_owners) > 1:
+        return (False, None, "multiple_owners_conflict")
+    
+    if authoritative_direction == 'To':
+        # Check if To has city-owned but From doesn't
+        to_city_values = get_city_owned_values(to_owners, to_materials)
+        from_city_values = get_city_owned_values(from_owners, from_materials)
+        
+        if to_city_values and not from_city_values:
+            # To has city ownership, From doesn't
+            unique_to_materials = list(set(to_city_values))
+            if len(unique_to_materials) == 1:
+                return (True, unique_to_materials[0], "authoritative_to_only")
+    
+    elif authoritative_direction == 'From':
+        # Check if From has city-owned but To doesn't
+        to_city_values = get_city_owned_values(to_owners, to_materials)
+        from_city_values = get_city_owned_values(from_owners, from_materials)
+        
+        if from_city_values and not to_city_values:
+            # From has city ownership, To doesn't
+            unique_from_materials = list(set(from_city_values))
+            if len(unique_from_materials) == 1:
+                return (True, unique_from_materials[0], "authoritative_from_only")
+    
+    return (False, None, "no_authoritative_match")
+
+
 def has_conflicting_values(values_list):
     """
     Check if there are conflicting non-null values in the list.
@@ -124,12 +153,13 @@ def has_conflicting_values(values_list):
     return len(unique_values) > 1
 
 
-def process_assignments(feature_class, adjacency_round):
+def process_assignments(feature_class, adjacency_round, authoritative_direction):
     """
     Process the feature class to assign missing ASB_DATE and PIPE_TYPE values
     based on adjacent segment data.
     """
     print(f"Processing assignments for Round {adjacency_round}...")
+    print(f"Authoritative direction: {authoritative_direction}")
     
     # Define all fields needed
     fields_list = [
@@ -154,6 +184,7 @@ def process_assignments(feature_class, adjacency_round):
         'date_assigned_from': 0,
         'material_assigned_to': 0,
         'material_assigned_from': 0,
+        'material_assigned_authoritative': 0,
         'skipped_date_to': 0,
         'skipped_date_from': 0,
         'skipped_material_to': 0,
@@ -246,6 +277,18 @@ def process_assignments(feature_class, adjacency_round):
                         city_materials = get_city_owned_values(from_owners, from_materials)
                         print(f"SKIP MATERIAL (From): FACILITYID={facility_id}, City-owned segments have conflicting materials. From_Owners={from_owners}, From_Materials={from_materials}, City_Materials={city_materials}")
                 
+                # Try authoritative direction logic if PIPE_TYPE still null
+                if row[3] is None and authoritative_direction:
+                    can_assign, material_value, reason = check_can_assign_authoritative(
+                        to_owners, from_owners, to_materials, from_materials, authoritative_direction
+                    )
+                    
+                    if can_assign:
+                        row[3] = material_value  # PIPE_TYPE
+                        row[5] = f'Adjacency Authoritative-{authoritative_direction}-Material (Round {adjacency_round})'
+                        stats['material_assigned_authoritative'] += 1
+                        updated = True
+                
                 if updated:
                     cursor.updateRow(row)
                 
@@ -278,6 +321,7 @@ def print_statistics(stats):
     print(f"Dates skipped (From): {stats['skipped_date_from']}")
     print(f"\nMaterials assigned from To fields: {stats['material_assigned_to']}")
     print(f"Materials assigned from From fields: {stats['material_assigned_from']}")
+    print(f"Materials assigned from Authoritative direction (when values at either to- or from-segments are null): {stats['material_assigned_authoritative']}")
     print(f"Materials skipped (To): {stats['skipped_material_to']}")
     print(f"Materials skipped (From): {stats['skipped_material_from']}")
     print("="*60)
@@ -304,7 +348,7 @@ def run():
             os.remove(log_file_path)
         except OSError:
             pass
-
+    
     # Set up dual logging
     logger = DualLogger(log_file_path)
     sys.stdout = logger
@@ -317,17 +361,15 @@ def run():
         
         # Verify required fields exist
         existing_fields = [f.name for f in arcpy.ListFields(input_fc)]
-        required_source_fields = [
-            'FACILITYID', 'ASB_DATE', 'PIPE_TYPE', 'To_Owner_1', 'To_Owner_2', 'To_Owner_3', 'To_Owner_4'
-        ]
-        required_output_fields = [
+        required_fields = [
+            'FACILITYID', 'ASB_DATE', 'PIPE_TYPE',
+            'To_Owner_1', 'To_Owner_2', 'To_Owner_3', 'To_Owner_4',
             'To_ASB_DATE_1', 'To_ASB_DATE_2', 'To_ASB_DATE_3', 'To_ASB_DATE_4',
             'To_Material_1', 'To_Material_2', 'To_Material_3', 'To_Material_4',
             'From_Owner_1', 'From_Owner_2', 'From_Owner_3', 'From_Owner_4',
             'From_ASB_DATE_1', 'From_ASB_DATE_2', 'From_ASB_DATE_3', 'From_ASB_DATE_4',
-            'From_Material_1', 'From_Material_2', 'From_Material_3', 'From_Material_4']
-        
-        required_fields = required_source_fields + required_output_fields
+            'From_Material_1', 'From_Material_2', 'From_Material_3', 'From_Material_4'
+        ]
         
         missing_fields = [f for f in required_fields if f not in existing_fields]
         
@@ -338,10 +380,9 @@ def run():
             print("\nPlease run obtain_adjacent_values.py first for both OWNER, DATE, and MATERIAL modes.")
             return
         
-        # no fields should be reset here
-        #reset_field_values(input_fc, required_output_fields)
         add_source_fields(input_fc)
-        stats = process_assignments(input_fc, adjacency_round)
+        authoritative_direction = os.getenv('AUTHORITATIVE_DIRECTION')
+        stats = process_assignments(input_fc, adjacency_round, authoritative_direction)
         print_statistics(stats)
         
         print(f"\nScript finished for Round {adjacency_round}.")
